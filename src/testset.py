@@ -31,7 +31,7 @@ CANDIDATES_PATH = ROOT / "data" / "eval" / "candidates.jsonl"
 TEST_SET_PATH = ROOT / "eval" / "test_set.jsonl"
 
 PER_COMPANY = 4
-SECONDS_BETWEEN_CALLS = 13  # free tier allows 5 requests/minute for gemini-3.8-flash
+SECONDS_BETWEEN_CALLS = 5  # free tier allows ~15 requests/minute for gemini-3.1-flash-lite
 EXPECTED_ANSWERABLE = 40
 EXPECTED_UNANSWERABLE = 10
 

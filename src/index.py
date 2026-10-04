@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 from src.config import ROOT, load_config
@@ -57,7 +58,7 @@ INSERT_SQL = """INSERT INTO chunks
 
 SEARCH_SQL = """SELECT id, ticker, text, source_url, 1 - (embedding <=> %s) AS score
     FROM chunks
-    WHERE index_name = %s AND (%s::text IS NULL OR ticker = %s)
+    WHERE index_name = %s AND (%s::text[] IS NULL OR ticker = ANY(%s))
     ORDER BY embedding <=> %s
     LIMIT %s"""
 
@@ -86,6 +87,7 @@ def rows_for_insert(chunks: list[dict], vectors, index_name: str) -> list[tuple]
     ]
 
 
+@lru_cache(maxsize=2)
 def load_embedder(model_name: str):
     from sentence_transformers import SentenceTransformer  # heavy import, only when needed
 
@@ -129,9 +131,10 @@ def write_index(conn, rows: list[tuple], index_name: str, dim: int) -> None:
     conn.commit()
 
 
-def search(conn, query_vector, index_name: str, ticker: str | None, k: int) -> list[tuple]:
+def search(conn, query_vector, index_name: str, tickers: list[str] | None, k: int) -> list[tuple]:
+    """Top-k chunks by cosine similarity, optionally only from the given companies."""
     with conn.cursor() as cur:
-        cur.execute(SEARCH_SQL, (query_vector, index_name, ticker, ticker, query_vector, k))
+        cur.execute(SEARCH_SQL, (query_vector, index_name, tickers, tickers, query_vector, k))
         return cur.fetchall()
 
 
@@ -156,12 +159,12 @@ def build(index_name: str) -> int:
     return n
 
 
-def query(text: str, index_name: str, ticker: str | None, k: int) -> list[tuple]:
+def query(text: str, index_name: str, tickers: list[str] | None, k: int) -> list[tuple]:
     cfg = load_config()["retrieval"]
     model = load_embedder(cfg["embedding_model"])
     conn = connect(db_url())
     try:
-        return search(conn, embed(model, [text])[0], index_name, ticker, k)
+        return search(conn, embed(model, [text])[0], index_name, tickers, k)
     finally:
         conn.close()
 
@@ -176,7 +179,7 @@ def main() -> None:
     try:
         if args.query:
             for cid, _ticker, text, _url, score in query(
-                args.query, args.index_name, args.ticker, args.k
+                args.query, args.index_name, [args.ticker] if args.ticker else None, args.k
             ):
                 print(f"{score:.3f}  {cid}  {text[:160]}...")
         else:

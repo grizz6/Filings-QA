@@ -85,3 +85,14 @@ Likely cause of the weak result: `all-MiniLM-L6-v2` truncates input at 256 word 
 (about 190 words), so roughly half of each 400-word chunk never reaches the embedding.
 Day 7's chunk-size experiment (200 vs 400 words) will measure this with hit rate and MRR
 instead of guessing.
+
+## Day 5: Retrieve + answer
+
+- `src/retrieve.py`: detects companies named in the question (ticker, name, first word of the
+  name, plus aliases in config.yaml such as "JP Morgan") and searches only their chunks;
+  otherwise searches all 10 filings. Whole-word matching, so "pineapple" is not Apple.
+- `src/answer.py`: top-5 chunks labeled [1]..[5] go to Gemini with three rules: use only the
+  excerpts, cite like [2], and say exactly "Not found in the filings." otherwise. Citation
+  numbers are mapped back to chunk IDs and SEC URLs; out-of-range numbers are dropped.
+- `qa-demo.yml` runs 10 questions in the cloud (8 answerable, 2 that Risk Factors cannot
+  answer, to check refusals). The embedding model is cached so it loads once per run.
