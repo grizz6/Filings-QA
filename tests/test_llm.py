@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from src import llm
@@ -78,7 +80,7 @@ def test_error_status_raises_after_retries(monkeypatch):
     with pytest.raises(llm.LLMError, match="429"):
         llm.chat([{"role": "user", "content": "hi"}], CFG, sleep=sleeps.append)
     assert len(calls) == llm.MAX_RETRIES + 1
-    assert sleeps == [2, 4, 8]
+    assert sleeps == [2, 4, 8, 16, 32]  # no delay given by the server: exponential backoff
 
 
 def test_overloaded_then_success(monkeypatch):
@@ -134,3 +136,53 @@ def test_json_mode_sets_response_mime_type():
     payload = llm.build_payload([{"role": "user", "content": "hi"}], CFG, json_mode=True)
     assert payload["generationConfig"]["responseMimeType"] == "application/json"
     assert "responseMimeType" not in llm.build_payload([], CFG)["generationConfig"]
+
+
+# Shape of the 429 seen in CI (free tier: 5 requests/minute for gemini-3.8-flash).
+def _quota_error(quota_id="GenerateRequestsPerMinutePerProjectPerModel-FreeTier", delay="41s"):
+    return json.dumps(
+        {
+            "error": {
+                "code": 429,
+                "message": "You exceeded your current quota ... Please retry in 41.977604342s.",
+                "status": "RESOURCE_EXHAUSTED",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                        "violations": [{"quotaId": quota_id}],
+                    },
+                    {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": delay},
+                ],
+            }
+        }
+    )
+
+
+def test_retry_delay_parsed_from_retry_info_or_message():
+    assert llm.retry_delay_seconds(_quota_error(delay="41s")) == 41.0
+    assert llm.retry_delay_seconds('{"error": {"message": "Please retry in 29.5s."}}') == 29.5
+    assert llm.retry_delay_seconds("not json") is None
+
+
+def test_rate_limit_waits_as_long_as_gemini_asks(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    responses = [FakeResponse(429, text=_quota_error(delay="41s")), FakeResponse(200, _reply("hi"))]
+    monkeypatch.setattr(llm.requests, "post", lambda *a, **k: responses.pop(0))
+    sleeps = []
+    assert llm.chat([{"role": "user", "content": "hi"}], CFG, sleep=sleeps.append) == "hi"
+    assert sleeps == [42.0]  # the server's delay plus one second of margin
+
+
+def test_daily_quota_fails_fast_with_clear_message(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    body = _quota_error(quota_id="GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+    calls = []
+
+    def fake_post(*a, **k):
+        calls.append(1)
+        return FakeResponse(429, text=body)
+
+    monkeypatch.setattr(llm.requests, "post", fake_post)
+    with pytest.raises(llm.LLMError, match="daily free-tier quota"):
+        llm.chat([{"role": "user", "content": "hi"}], CFG, sleep=lambda s: None)
+    assert len(calls) == 1  # waiting a minute would not help
