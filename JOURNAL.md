@@ -70,3 +70,18 @@ furniture left at page breaks ("PART I", "Parts I and II", "2026 FORM 10-K 23",
 "Delta Air Lines, Inc. | 2025 Form 10-K") and DAL's heading sharing a line with its first
 sentence. Added tests with those exact strings, then filtered them out. Embedding worked;
 storing failed only because the `SUPABASE_DB_URL` secret was not set yet.
+
+### Day 4 results
+
+After header/footer cleanup: 328 chunks (was 330). With `SUPABASE_DB_URL` set, the pipeline on
+`main` stored all 328 in the `main` index, and the two test searches ran:
+
+| Query | Top 3 (cosine similarity) | Verdict |
+|---|---|---|
+| "cybersecurity breach" | WMT_1A_0018 (0.673), TSLA_1A_0017 (0.667), WMT_1A_0015 (0.652) | all on-topic |
+| "supply chain risk", TSLA only | TSLA_1A_0015 residual values (0.418), TSLA_1A_0000 intro (0.405), TSLA_1A_0032 dealer laws (0.378) | weak |
+
+Likely cause of the weak result: `all-MiniLM-L6-v2` truncates input at 256 word pieces
+(about 190 words), so roughly half of each 400-word chunk never reaches the embedding.
+Day 7's chunk-size experiment (200 vs 400 words) will measure this with hit rate and MRR
+instead of guessing.

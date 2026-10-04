@@ -7,7 +7,7 @@ A retrieval-augmented generation (RAG) system built as an MLOps project: tracked
 an evaluation test set, CI that blocks changes when retrieval quality drops, a containerized
 app, and monitoring. Runs entirely on free cloud services, with no credit card and no local LLM.
 
-> **Status:** Days 3–4 of 10 (parse, chunk, embed, store). See the roadmap below.
+> **Status:** Day 4 of 10 done (data indexed in Supabase). Next: retrieval + answers. See the roadmap below.
 
 ## Cloud stack (all free tiers)
 
@@ -56,8 +56,8 @@ requests write to a separate `ci` index in Supabase so they never touch `main`.
 |---|---|---|
 | 1 | Setup, CI (ruff, pytest, gitleaks), LLM smoke test | done |
 | 2 | Download 10 filings from SEC EDGAR (`src/download.py`, pipeline workflow) | done |
-| 3 | Parse "Item 1A. Risk Factors" + chunk + tests (`src/parse.py`, `src/chunk.py`): 10/10 sections, 330 chunks | done |
-| 4 | Embed + store in Supabase pgvector (`src/index.py`) | waiting on `SUPABASE_DB_URL` |
+| 3 | Parse "Item 1A. Risk Factors" + chunk + tests (`src/parse.py`, `src/chunk.py`): 10/10 sections, 328 chunks | done |
+| 4 | Embed + store in Supabase pgvector (`src/index.py`): 328 chunks in the `main` index | done |
 | 5 | Retrieve + answer with citations (v1.0) | |
 | 6 | 50-question test set | |
 | 7 | Evaluation + MLflow experiments | |
