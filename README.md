@@ -14,7 +14,7 @@ app, and monitoring. Runs entirely on free cloud services, with no credit card a
 | Piece | Service |
 |---|---|
 | Code, CI, eval gate, container registry | GitHub, GitHub Actions, GHCR |
-| LLM | Google Gemini API, free tier (`gemini-3.8-flash`) |
+| LLM | Google Gemini API, free tier (`gemini-3.1-flash-lite`) |
 | Vector store + question log | Supabase Postgres with pgvector |
 | App hosting (API, UI, dashboard) | Hugging Face Spaces |
 | Data source | SEC EDGAR (public, no key) |
