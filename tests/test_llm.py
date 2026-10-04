@@ -132,6 +132,12 @@ def test_empty_text_reports_finish_reason(monkeypatch):
         llm.chat([{"role": "user", "content": "hi"}], CFG)
 
 
+def test_json_mode_sets_response_mime_type():
+    payload = llm.build_payload([{"role": "user", "content": "hi"}], CFG, json_mode=True)
+    assert payload["generationConfig"]["responseMimeType"] == "application/json"
+    assert "responseMimeType" not in llm.build_payload([], CFG)["generationConfig"]
+
+
 # Shape of the 429 seen in CI (free tier: 5 requests/minute for gemini-3.8-flash).
 def _quota_error(quota_id="GenerateRequestsPerMinutePerProjectPerModel-FreeTier", delay="41s"):
     return json.dumps(

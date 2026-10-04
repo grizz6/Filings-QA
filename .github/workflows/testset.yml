@@ -1,0 +1,44 @@
+name: Test set candidates
+
+# Day 6: rebuild the chunks, then have Gemini draft one question + answer + exact quote
+# for 4 evenly spaced chunks per company. Quotes are checked against the chunk text.
+# A person reviews the candidates and writes eval/test_set.jsonl.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - src/testset.py
+      - .github/workflows/testset.yml
+
+permissions:
+  contents: read
+
+jobs:
+  candidates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements.txt
+      - name: Build chunks (download -> parse -> chunk)
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: |
+          python -m src.download
+          python -m src.parse
+          python -m src.chunk
+      - name: Draft candidate questions
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python -m src.testset candidates
+      - uses: actions/upload-artifact@v4
+        with:
+          name: testset-candidates
+          path: |
+            data/eval/candidates.jsonl
+            data/chunks.jsonl
+          retention-days: 30

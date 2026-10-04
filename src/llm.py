@@ -39,8 +39,11 @@ def _headers(key: str) -> dict[str, str]:
     return {"x-goog-api-key": key, "Content-Type": "application/json"}
 
 
-def build_payload(messages: list[dict[str, str]], llm_cfg: dict) -> dict:
-    """Convert OpenAI-style messages (system/user/assistant) to a Gemini request body."""
+def build_payload(messages: list[dict[str, str]], llm_cfg: dict, json_mode: bool = False) -> dict:
+    """Convert OpenAI-style messages (system/user/assistant) to a Gemini request body.
+
+    json_mode asks Gemini to reply with a JSON document instead of prose.
+    """
     system = [m["content"] for m in messages if m["role"] == "system"]
     contents = [
         {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
@@ -54,6 +57,8 @@ def build_payload(messages: list[dict[str, str]], llm_cfg: dict) -> dict:
             "maxOutputTokens": llm_cfg.get("max_tokens", 2048),
         },
     }
+    if json_mode:
+        payload["generationConfig"]["responseMimeType"] = "application/json"
     if system:
         payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system)}]}
     return payload
@@ -77,7 +82,12 @@ def is_daily_quota(body: str) -> bool:
     return "PerDay" in body
 
 
-def chat(messages: list[dict[str, str]], llm_cfg: dict | None = None, sleep=time.sleep) -> str:
+def chat(
+    messages: list[dict[str, str]],
+    llm_cfg: dict | None = None,
+    sleep=time.sleep,
+    json_mode: bool = False,
+) -> str:
     """Send chat messages and return the reply text.
 
     On 429/500/503 it waits as long as Gemini asks (plus a second), or 2, 4, 8, ... s when
@@ -92,7 +102,7 @@ def chat(messages: list[dict[str, str]], llm_cfg: dict | None = None, sleep=time
         resp = requests.post(
             url,
             headers=_headers(key),
-            json=build_payload(messages, llm_cfg),
+            json=build_payload(messages, llm_cfg, json_mode),
             timeout=TIMEOUT_SECONDS,
             allow_redirects=False,
         )
