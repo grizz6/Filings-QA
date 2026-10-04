@@ -11,6 +11,7 @@ Step 2, by a person: review the candidates, edit or drop weak ones, add unanswer
 
 Step 3: validate the file.
     python -m src.testset check        # schema + 40 answerable / 10 unanswerable split
+    python -m src.testset verify       # every quote appears in its expected chunk
 
 Each answerable item stores its quote, so a retrieved chunk counts as correct when it
 contains the quote. That keeps the test set valid when chunk sizes (and IDs) change.
@@ -152,6 +153,22 @@ def check_test_set(items: list[dict], tickers: set[str]) -> list[str]:
     return problems
 
 
+def verify_quotes(items: list[dict], chunks: list[dict]) -> list[str]:
+    """Check each answerable quote against the real chunk text; return problems."""
+    by_id = {c["id"]: c for c in chunks}
+    problems = []
+    for it in items:
+        if not it.get("answerable"):
+            continue
+        for cid in it["expected_chunk_ids"]:
+            chunk = by_id.get(cid)
+            if chunk is None:
+                problems.append(f"{it['id']}: chunk {cid} does not exist")
+            elif not contains_quote(chunk["text"], it["quote"]):
+                problems.append(f"{it['id']}: quote not found in {cid}")
+    return problems
+
+
 def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     cfg = load_config()
@@ -167,6 +184,12 @@ def main() -> None:
             print(json.dumps(c, ensure_ascii=False))
         ok = sum(c["grounded"] for c in cands)
         print(f"{ok}/{len(cands)} candidates grounded -> {CANDIDATES_PATH.relative_to(ROOT)}")
+    elif cmd == "verify":
+        problems = verify_quotes(load_jsonl(TEST_SET_PATH), load_jsonl(CHUNKS_PATH))
+        if problems:
+            print("\n".join(f"ERROR: {p}" for p in problems), file=sys.stderr)
+            sys.exit(1)
+        print("every answerable quote was found in its expected chunk")
     elif cmd == "check":
         problems = check_test_set(load_jsonl(TEST_SET_PATH), set(cfg["companies"]))
         if problems:
@@ -174,7 +197,7 @@ def main() -> None:
             sys.exit(1)
         print(f"{TEST_SET_PATH.relative_to(ROOT)} is valid")
     else:
-        sys.exit("usage: python -m src.testset candidates|check")
+        sys.exit("usage: python -m src.testset candidates|check|verify")
 
 
 if __name__ == "__main__":

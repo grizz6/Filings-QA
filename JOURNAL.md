@@ -96,3 +96,28 @@ instead of guessing.
   numbers are mapped back to chunk IDs and SEC URLs; out-of-range numbers are dropped.
 - `qa-demo.yml` runs 10 questions in the cloud (8 answerable, 2 that Risk Factors cannot
   answer, to check refusals). The embedding model is cached so it loads once per run.
+
+### Day 5 results
+
+- First demo runs hit Gemini's free-tier limits: `gemini-3.8-flash` allows 5 requests/minute
+  and its daily quota ran out after ~15-20 calls. The client now waits as long as Gemini asks
+  ("retry in 42s") and fails fast with a clear message on a per-day quota. Switched to
+  `gemini-3.1-flash-lite` (also free, ~15/min and ~1,000/day reported).
+- Demo on Flash-Lite: 8/8 answerable questions answered with citations to the right company's
+  chunks; 2/2 unanswerable ("Apple's total revenue", "Microsoft's CEO") answered
+  "Not found in the filings." The Tesla supply-chain answer is thin because retrieval ranks
+  weak chunks (the truncation issue noted on Day 4).
+
+## Day 6: Test set
+
+- Drafting in the cloud: for 4 evenly spaced chunks per company, Gemini wrote a question, a
+  short answer and an exact quote; a draft was kept only if the quote appears word for word in
+  the chunk. 40/40 drafts were grounded on the first run.
+- Review: kept all 40, rewrote questions to read naturally, shortened answers to what the
+  quote supports, and trimmed two quotes that contained page furniture ("Item 1A" inside an
+  MSFT sentence) or bullet characters (JPM).
+- Added 10 questions a Risk Factors section should not answer (exact revenue, CEO/CFO names,
+  delivery counts, plan prices...), one per company, to measure refusals.
+- Each answerable item keeps its quote, so a retrieved chunk counts as correct when it
+  contains the quote. This survives chunk-size experiments that change chunk IDs.
+- `testset-verify.yml` rebuilds the chunks and checks every quote against the real text.

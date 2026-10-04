@@ -3,11 +3,11 @@ name: Test set candidates
 # Day 6: rebuild the chunks, then have Gemini draft one question + answer + exact quote
 # for 4 evenly spaced chunks per company. Quotes are checked against the chunk text.
 # A person reviews the candidates and writes eval/test_set.jsonl.
+# Run by hand (Actions -> Test set candidates -> Run workflow): ~40 Gemini calls.
 on:
   workflow_dispatch:
   pull_request:
     paths:
-      - src/testset.py
       - .github/workflows/testset.yml
 
 permissions:

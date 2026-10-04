@@ -89,3 +89,25 @@ def test_check_test_set_reports_problems():
     assert any("got 40 + 0" in p for p in problems)
     assert any("unknown ticker ZZZ" in p for p in problems)
     assert any("needs a quote" in p for p in problems)
+
+
+def test_verify_quotes_against_chunks():
+    chunks = [{"id": "TSLA_1A_0007", "text": CHUNK_TEXT}]
+    good = _item(1, quote="Any disruption in the supply of battery cells",
+                 expected_chunk_ids=["TSLA_1A_0007"])  # fmt: skip
+    bad = _item(2, quote="Tesla builds rockets on the moon every year",
+                expected_chunk_ids=["TSLA_1A_0007"])  # fmt: skip
+    missing = _item(3, expected_chunk_ids=["TSLA_1A_9999"])
+    skipped = _item(4, answerable=False)
+    problems = testset.verify_quotes([good, bad, missing, skipped], chunks)
+    assert problems == [
+        "q02: quote not found in TSLA_1A_0007",
+        "q03: chunk TSLA_1A_9999 does not exist",
+    ]
+
+
+def test_committed_test_set_is_valid():
+    from src.config import load_config
+
+    items = testset.load_jsonl(testset.TEST_SET_PATH)
+    assert testset.check_test_set(items, set(load_config()["companies"])) == []
