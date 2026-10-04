@@ -1,0 +1,50 @@
+name: Q&A demo
+
+# Asks the questions in eval/demo_questions.txt (or one question typed in when run by
+# hand) against the "main" index and prints answers with citations to the log.
+on:
+  workflow_dispatch:
+    inputs:
+      question:
+        description: "Question (leave empty to run eval/demo_questions.txt)"
+        required: false
+  pull_request:
+    paths:
+      - src/retrieve.py
+      - src/answer.py
+      - src/llm.py
+      - src/index.py
+      - config.yaml
+      - eval/demo_questions.txt
+      - .github/workflows/qa-demo.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-demo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ask:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements-index.txt
+      - name: Answer questions
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          QUESTION: ${{ github.event.inputs.question }}
+        run: |
+          if [ -n "$QUESTION" ]; then
+            python -m src.answer "$QUESTION"
+          else
+            python -m src.answer --file eval/demo_questions.txt
+          fi

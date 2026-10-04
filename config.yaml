@@ -12,6 +12,13 @@ companies:  # ticker -> name (Day 2 downloads the latest 10-K for each)
   NFLX: Netflix
   DAL: Delta Air Lines
 
+# Extra names people use for a company in questions (ticker, full name and first word of
+# the name are always recognized). Used to search only that company's filing.
+aliases:
+  JPM: [jp morgan, jpmorganchase, chase]
+  XOM: [exxonmobil]
+  DAL: [delta airlines]
+
 # Use a specific SEC CIK instead of the one SEC's ticker list gives.
 # XOM: Exxon redomiciled to a new Texas holding company on 2026-07-01 that took over the
 # ticker (new CIK 2115436) but has not filed a 10-K yet; the 10-Ks are under the old CIK.

@@ -99,3 +99,21 @@ def test_load_chunks(tmp_path):
     path = tmp_path / "chunks.jsonl"
     path.write_text(json.dumps(CHUNK) + "\n\n")
     assert index.load_chunks(path) == [CHUNK]
+
+
+def test_search_filters_by_ticker_list():
+    calls = []
+
+    class Cur(FakeCursor):
+        def fetchall(self):
+            return [("TSLA_1A_0000", "TSLA", "t", "u", 0.9)]
+
+    class Conn(FakeConn):
+        def cursor(self):
+            return Cur(calls)
+
+    rows = index.search(Conn(), [0.1], "main", ["TSLA", "AAPL"], 5)
+    _, sql, params = calls[0]
+    assert "ticker = ANY(%s)" in sql
+    assert params == ([0.1], "main", ["TSLA", "AAPL"], ["TSLA", "AAPL"], [0.1], 5)
+    assert rows[0][0] == "TSLA_1A_0000"

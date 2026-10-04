@@ -45,10 +45,13 @@ python -m src.chunk          # -> data/chunks.jsonl (400 words, 50 overlap, IDs 
 pip install -r requirements-index.txt   # sentence-transformers (CPU PyTorch), psycopg, pgvector
 python -m src.index          # embed + store in Supabase; needs SUPABASE_DB_URL in .env
 python -m src.index --query "supply chain risk" --ticker TSLA
+python -m src.answer "What does Tesla say about supply chain risk?"   # needs GEMINI_API_KEY too
 ```
 
 In the cloud, `.github/workflows/pipeline.yml` runs all of these in GitHub Actions. Pull
 requests write to a separate `ci` index in Supabase so they never touch `main`.
+`.github/workflows/qa-demo.yml` answers `eval/demo_questions.txt` (or a question you type in
+under Actions → Q&A demo → Run workflow) and prints the answers with citations.
 
 ## Roadmap
 
@@ -58,7 +61,7 @@ requests write to a separate `ci` index in Supabase so they never touch `main`.
 | 2 | Download 10 filings from SEC EDGAR (`src/download.py`, pipeline workflow) | done |
 | 3 | Parse "Item 1A. Risk Factors" + chunk + tests (`src/parse.py`, `src/chunk.py`): 10/10 sections, 328 chunks | done |
 | 4 | Embed + store in Supabase pgvector (`src/index.py`): 328 chunks in the `main` index | done |
-| 5 | Retrieve + answer with citations (v1.0) | |
+| 5 | Retrieve + answer with citations (`src/retrieve.py`, `src/answer.py`) (v1.0) | in progress |
 | 6 | 50-question test set | |
 | 7 | Evaluation + MLflow experiments | |
 | 8 | CI eval gate (blocks quality drops) | |
