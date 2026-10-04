@@ -128,3 +128,9 @@ def test_empty_text_reports_finish_reason(monkeypatch):
     )
     with pytest.raises(llm.LLMError, match="MAX_TOKENS"):
         llm.chat([{"role": "user", "content": "hi"}], CFG)
+
+
+def test_json_mode_sets_response_mime_type():
+    payload = llm.build_payload([{"role": "user", "content": "hi"}], CFG, json_mode=True)
+    assert payload["generationConfig"]["responseMimeType"] == "application/json"
+    assert "responseMimeType" not in llm.build_payload([], CFG)["generationConfig"]
