@@ -8,7 +8,9 @@ Smoke test:  python -m src.llm "Say hi"
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import sys
 import time
 
@@ -18,7 +20,8 @@ from src.config import load_config
 
 TIMEOUT_SECONDS = 60
 RETRY_STATUSES = (429, 500, 503)  # rate limited, or the model is temporarily overloaded
-MAX_RETRIES = 3
+MAX_RETRIES = 5
+MAX_WAIT_SECONDS = 90
 
 
 class LLMError(RuntimeError):
@@ -36,8 +39,11 @@ def _headers(key: str) -> dict[str, str]:
     return {"x-goog-api-key": key, "Content-Type": "application/json"}
 
 
-def build_payload(messages: list[dict[str, str]], llm_cfg: dict) -> dict:
-    """Convert OpenAI-style messages (system/user/assistant) to a Gemini request body."""
+def build_payload(messages: list[dict[str, str]], llm_cfg: dict, json_mode: bool = False) -> dict:
+    """Convert OpenAI-style messages (system/user/assistant) to a Gemini request body.
+
+    json_mode asks Gemini to reply with a JSON document instead of prose.
+    """
     system = [m["content"] for m in messages if m["role"] == "system"]
     contents = [
         {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
@@ -51,15 +57,41 @@ def build_payload(messages: list[dict[str, str]], llm_cfg: dict) -> dict:
             "maxOutputTokens": llm_cfg.get("max_tokens", 2048),
         },
     }
+    if json_mode:
+        payload["generationConfig"]["responseMimeType"] = "application/json"
     if system:
         payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(system)}]}
     return payload
 
 
-def chat(messages: list[dict[str, str]], llm_cfg: dict | None = None, sleep=time.sleep) -> str:
+def retry_delay_seconds(body: str) -> float | None:
+    """How long Gemini asks us to wait, from RetryInfo ("41s") or the message text."""
+    try:
+        error = json.loads(body).get("error", {})
+    except (ValueError, AttributeError):
+        return None
+    for detail in error.get("details", []):
+        if detail.get("@type", "").endswith("RetryInfo") and "retryDelay" in detail:
+            return float(str(detail["retryDelay"]).rstrip("s"))
+    m = re.search(r"retry in ([\d.]+)s", error.get("message", ""))
+    return float(m.group(1)) if m else None
+
+
+def is_daily_quota(body: str) -> bool:
+    """A per-day quota resets once a day, so retrying within minutes cannot help."""
+    return "PerDay" in body
+
+
+def chat(
+    messages: list[dict[str, str]],
+    llm_cfg: dict | None = None,
+    sleep=time.sleep,
+    json_mode: bool = False,
+) -> str:
     """Send chat messages and return the reply text.
 
-    Retries with exponential backoff (2, 4, 8 s) when Gemini is rate limited or overloaded.
+    On 429/500/503 it waits as long as Gemini asks (plus a second), or 2, 4, 8, ... s when
+    no delay is given, up to MAX_RETRIES times. A daily quota error fails immediately.
     """
     llm_cfg = llm_cfg or load_config()["llm"]
     url = f"{llm_cfg['endpoint'].rstrip('/')}/models/{llm_cfg['model']}:generateContent"
@@ -70,12 +102,18 @@ def chat(messages: list[dict[str, str]], llm_cfg: dict | None = None, sleep=time
         resp = requests.post(
             url,
             headers=_headers(key),
-            json=build_payload(messages, llm_cfg),
+            json=build_payload(messages, llm_cfg, json_mode),
             timeout=TIMEOUT_SECONDS,
             allow_redirects=False,
         )
+        if resp.status_code == 429 and is_daily_quota(resp.text):
+            raise LLMError(
+                "Gemini daily free-tier quota is used up for this model; it resets daily. "
+                f"Details: {resp.text[:300]}"
+            )
         if resp.status_code in RETRY_STATUSES and attempt < MAX_RETRIES:
-            sleep(2 ** (attempt + 1))
+            delay = retry_delay_seconds(resp.text)
+            sleep(min(MAX_WAIT_SECONDS, delay + 1 if delay is not None else 2 ** (attempt + 1)))
             continue
         break
     if resp.status_code != 200:
