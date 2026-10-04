@@ -1,0 +1,47 @@
+name: Test set verify
+
+# Checks eval/test_set.jsonl against the real filings: every answerable question's quote
+# must appear word for word in its expected chunk. No LLM calls.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - eval/test_set.jsonl
+      - src/testset.py
+      - src/parse.py
+      - src/chunk.py
+      - config.yaml
+      - .github/workflows/testset-verify.yml
+  push:
+    branches: [main]
+    paths:
+      - eval/test_set.jsonl
+      - src/parse.py
+      - src/chunk.py
+      - config.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements.txt
+      - name: Build chunks (download -> parse -> chunk)
+        env:
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+        run: |
+          python -m src.download
+          python -m src.parse
+          python -m src.chunk
+      - name: Check schema and quotes
+        run: |
+          python -m src.testset check
+          python -m src.testset verify

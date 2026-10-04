@@ -7,7 +7,7 @@ A retrieval-augmented generation (RAG) system built as an MLOps project: tracked
 an evaluation test set, CI that blocks changes when retrieval quality drops, a containerized
 app, and monitoring. Runs entirely on free cloud services, with no credit card and no local LLM.
 
-> **Status:** Day 4 of 10 done (data indexed in Supabase). Next: retrieval + answers. See the roadmap below.
+> **Status:** v1.0 works (cited answers). Day 6: 50-question test set. See the roadmap below.
 
 ## Cloud stack (all free tiers)
 
@@ -61,8 +61,8 @@ under Actions → Q&A demo → Run workflow) and prints the answers with citatio
 | 2 | Download 10 filings from SEC EDGAR (`src/download.py`, pipeline workflow) | done |
 | 3 | Parse "Item 1A. Risk Factors" + chunk + tests (`src/parse.py`, `src/chunk.py`): 10/10 sections, 328 chunks | done |
 | 4 | Embed + store in Supabase pgvector (`src/index.py`): 328 chunks in the `main` index | done |
-| 5 | Retrieve + answer with citations (`src/retrieve.py`, `src/answer.py`) (v1.0) | in progress |
-| 6 | 50-question test set | |
+| 5 | Retrieve + answer with citations (`src/retrieve.py`, `src/answer.py`): demo 8/8 answered with citations, 2/2 refused (v1.0) | done |
+| 6 | 50-question test set (`eval/test_set.jsonl`, `src/testset.py`) | in review |
 | 7 | Evaluation + MLflow experiments | |
 | 8 | CI eval gate (blocks quality drops) | |
 | 9 | FastAPI + Streamlit + Docker, deployed to Spaces | |
