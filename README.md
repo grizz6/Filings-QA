@@ -46,6 +46,10 @@ pip install -r requirements-index.txt   # sentence-transformers (CPU PyTorch), p
 python -m src.index          # embed + store in Supabase; needs SUPABASE_DB_URL in .env
 python -m src.index --query "supply chain risk" --ticker TSLA
 python -m src.answer "What does Tesla say about supply chain risk?"   # needs GEMINI_API_KEY too
+pip install -r requirements-eval.txt     # adds MLflow
+python -m src.evaluate --all             # Day 7 experiments -> mlflow.db (needs data/sections/)
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+python -m src.evaluate --gate            # Day 8: config.yaml vs eval/thresholds.yaml, no LLM
 ```
 
 In the cloud, `.github/workflows/pipeline.yml` runs all of these in GitHub Actions. Pull
