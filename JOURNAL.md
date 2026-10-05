@@ -127,6 +127,8 @@ instead of guessing.
   timeouts, and a call that still fails is reported as "not audited" instead of failing.
   q07 was flagged only because the model copied half a sentence and paraphrased the rest, so
   evidence now counts when 10+ consecutive words match the section.
+- Audit result: all 50 questions agree with the full sections (40/40 answered with
+  evidence found in the text, 10/10 unanswerable confirmed not answered).
 
 ## Day 7: Experiments
 
