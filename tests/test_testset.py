@@ -111,3 +111,55 @@ def test_committed_test_set_is_valid():
 
     items = testset.load_jsonl(testset.TEST_SET_PATH)
     assert testset.check_test_set(items, set(load_config()["companies"])) == []
+
+
+SECTION = CHUNK_TEXT + " Our Chief Executive Officer is Elon Musk."
+
+
+def _audit_reply(answerable, evidence=""):
+    return lambda m, c, json_mode: json.dumps({"answerable": answerable, "evidence": evidence})
+
+
+def test_audit_item_verdicts():
+    item = {"id": "q01", "question": "Q?"}
+    real = "Any disruption in the supply of battery cells from our suppliers could limit"
+    assert testset.audit_item(item, SECTION, "Tesla", _audit_reply(True, real), {})["verdict"] == (
+        "answered"
+    )
+    invented = "Tesla has no supply chain risks at all in any market"
+    assert (
+        testset.audit_item(item, SECTION, "Tesla", _audit_reply(True, invented), {})["verdict"]
+        == "unclear"
+    )
+    assert testset.audit_item(item, SECTION, "Tesla", _audit_reply(False), {})["verdict"] == (
+        "not_answered"
+    )
+    bad_json = lambda m, c, json_mode: "nope"  # noqa: E731
+    assert testset.audit_item(item, SECTION, "Tesla", bad_json, {})["verdict"] == "unclear"
+
+
+def test_audit_problems_flags_both_directions():
+    items = [
+        {"id": "q01", "answerable": True},
+        {"id": "q02", "answerable": False},
+        {"id": "q03", "answerable": False},
+    ]
+    results = [
+        {"id": "q01", "verdict": "not_answered", "evidence": ""},
+        {"id": "q02", "verdict": "answered", "evidence": "Our CEO is Elon Musk."},
+        {"id": "q03", "verdict": "not_answered", "evidence": ""},
+    ]
+    assert testset.audit_problems(items, results) == [
+        "q01: expected answerable, audit says not_answered",
+        "q02: expected unanswerable, but section says: Our CEO is Elon Musk.",
+    ]
+
+
+def test_run_audit_reads_each_company_section(tmp_path):
+    (tmp_path / "TSLA.txt").write_text(SECTION)
+    items = [{"id": "q01", "ticker": "TSLA", "question": "Who is the CEO?", "answerable": False}]
+    ceo = "Our Chief Executive Officer is Elon Musk."
+    results = testset.run_audit(
+        items, {"TSLA": "Tesla"}, tmp_path, _audit_reply(True, ceo), {}, sleep=lambda s: None
+    )
+    assert results == [{"id": "q01", "verdict": "answered", "evidence": ceo}]

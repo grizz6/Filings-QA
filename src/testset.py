@@ -12,6 +12,12 @@ Step 2, by a person: review the candidates, edit or drop weak ones, add unanswer
 Step 3: validate the file.
     python -m src.testset check        # schema + 40 answerable / 10 unanswerable split
     python -m src.testset verify       # every quote appears in its expected chunk
+    python -m src.testset audit        # full-section check of every question (LLM)
+
+The audit gives Gemini the company's ENTIRE Risk Factors section and asks whether it
+answers the question, with an exact supporting sentence. The sentence is checked against the
+section text, so the audit cannot be satisfied by an invented quote. It flags unanswerable
+questions that the section does answer, and answerable ones it does not support.
 
 Each answerable item stores its quote, so a retrieved chunk counts as correct when it
 contains the quote. That keeps the test set valid when chunk sizes (and IDs) change.
@@ -28,11 +34,15 @@ from pathlib import Path
 from src.config import ROOT, load_config
 
 CHUNKS_PATH = ROOT / "data" / "chunks.jsonl"
+SECTIONS_DIR = ROOT / "data" / "sections"
 CANDIDATES_PATH = ROOT / "data" / "eval" / "candidates.jsonl"
 TEST_SET_PATH = ROOT / "eval" / "test_set.jsonl"
 
 PER_COMPANY = 4
 SECONDS_BETWEEN_CALLS = 5  # free tier allows ~15 requests/minute for gemini-3.1-flash-lite
+# Audit calls send a whole Risk Factors section (up to ~20k tokens), so they are spaced
+# further apart to stay under the free tier's tokens-per-minute limit.
+AUDIT_SECONDS_BETWEEN_CALLS = 7
 EXPECTED_ANSWERABLE = 40
 EXPECTED_UNANSWERABLE = 10
 
@@ -121,6 +131,62 @@ def make_candidates(chunks, companies, chat_fn, llm_cfg, sleep=time.sleep) -> li
     return out
 
 
+AUDIT_PROMPT = """Below is the complete "Risk Factors" section of {company}'s annual report.
+
+Does this section answer the question? Answer only from the section.
+
+Question: {question}
+
+Return JSON with exactly these keys:
+- "answerable": true if the section contains the answer, otherwise false.
+- "evidence": if answerable, one sentence copied EXACTLY, word for word, from the section that
+  answers the question; otherwise "".
+
+Section:
+{section}"""
+
+
+def audit_item(item: dict, section: str, company: str, chat_fn, llm_cfg: dict) -> dict:
+    """Ask whether the full section answers the question; verify the evidence sentence."""
+    prompt = AUDIT_PROMPT.format(company=company, question=item["question"], section=section)
+    try:
+        data = json.loads(chat_fn([{"role": "user", "content": prompt}], llm_cfg, json_mode=True))
+        says_answerable = bool(data.get("answerable"))
+        evidence = str(data.get("evidence", "")).strip()
+    except (ValueError, AttributeError):
+        return {"id": item["id"], "verdict": "unclear", "evidence": ""}
+    if says_answerable and contains_quote(section, evidence):
+        verdict = "answered"
+    elif says_answerable:
+        verdict = "unclear"  # claims an answer but the sentence is not in the section
+    else:
+        verdict = "not_answered"
+    return {"id": item["id"], "verdict": verdict, "evidence": evidence}
+
+
+def audit_problems(items: list[dict], results: list[dict]) -> list[str]:
+    """Mismatches between what the test set says and what the full-section audit found."""
+    by_id = {r["id"]: r for r in results}
+    problems = []
+    for it in items:
+        r = by_id[it["id"]]
+        if it["answerable"] and r["verdict"] != "answered":
+            problems.append(f"{it['id']}: expected answerable, audit says {r['verdict']}")
+        if not it["answerable"] and r["verdict"] == "answered":
+            problems.append(f"{it['id']}: expected unanswerable, but section says: {r['evidence']}")
+    return problems
+
+
+def run_audit(items, companies, sections_dir, chat_fn, llm_cfg, sleep=time.sleep) -> list[dict]:
+    results = []
+    for i, it in enumerate(items):
+        if i:
+            sleep(AUDIT_SECONDS_BETWEEN_CALLS)
+        section = (sections_dir / f"{it['ticker']}.txt").read_text()
+        results.append(audit_item(it, section, companies[it["ticker"]], chat_fn, llm_cfg))
+    return results
+
+
 def load_jsonl(path: Path) -> list[dict]:
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
@@ -190,6 +256,18 @@ def main() -> None:
             print("\n".join(f"ERROR: {p}" for p in problems), file=sys.stderr)
             sys.exit(1)
         print("every answerable quote was found in its expected chunk")
+    elif cmd == "audit":
+        from src.llm import chat
+
+        items = load_jsonl(TEST_SET_PATH)
+        results = run_audit(items, cfg["companies"], SECTIONS_DIR, chat, cfg["llm"])
+        for r in results:
+            print(json.dumps(r, ensure_ascii=False))
+        problems = audit_problems(items, results)
+        if problems:
+            print("\n".join(f"ERROR: {p}" for p in problems), file=sys.stderr)
+            sys.exit(1)
+        print(f"audit: all {len(items)} questions agree with the full Risk Factors sections")
     elif cmd == "check":
         problems = check_test_set(load_jsonl(TEST_SET_PATH), set(cfg["companies"]))
         if problems:
@@ -197,7 +275,7 @@ def main() -> None:
             sys.exit(1)
         print(f"{TEST_SET_PATH.relative_to(ROOT)} is valid")
     else:
-        sys.exit("usage: python -m src.testset candidates|check|verify")
+        sys.exit("usage: python -m src.testset candidates|check|verify|audit")
 
 
 if __name__ == "__main__":
