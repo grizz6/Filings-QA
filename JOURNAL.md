@@ -156,3 +156,5 @@ are logged to MLflow (`filings-qa-retrieval`); the database is a workflow artifa
   Retrieval only, so no LLM quota is spent in CI and the result is deterministic.
 - Thresholds allow one question to slip (0.900 -> 0.875). Raising them is a deliberate
   change in the same PR that improves retrieval.
+- Proof: a throwaway PR set `top_k: 1`. The gate failed it with hit rate 0.475 and MRR 0.475
+  (thresholds 0.875 / 0.59), and the PR was closed without merging.
