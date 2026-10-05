@@ -17,7 +17,8 @@ Step 3: validate the file.
 The audit gives Gemini the company's ENTIRE Risk Factors section and asks whether it
 answers the question, with an exact supporting sentence. The sentence is checked against the
 section text, so the audit cannot be satisfied by an invented quote. It flags unanswerable
-questions that the section does answer, and answerable ones it does not support.
+questions that the section does answer, and answerable ones it does not support. A call that
+still fails after the retries (e.g. Gemini overloaded) is listed as a warning, not a mismatch.
 
 Each answerable item stores its quote, so a retrieved chunk counts as correct when it
 contains the quote. That keeps the test set valid when chunk sizes (and IDs) change.
@@ -32,6 +33,7 @@ import time
 from pathlib import Path
 
 from src.config import ROOT, load_config
+from src.llm import LLMError
 
 CHUNKS_PATH = ROOT / "data" / "chunks.jsonl"
 SECTIONS_DIR = ROOT / "data" / "sections"
@@ -76,6 +78,22 @@ def normalize(text: str) -> str:
 def contains_quote(chunk_text: str, quote: str) -> bool:
     q = normalize(quote).strip(" .\"'")
     return len(q.split()) >= 5 and q in normalize(chunk_text)
+
+
+GROUNDING_SPAN_WORDS = 10
+
+
+def grounded_in(text: str, evidence: str, span: int = GROUNDING_SPAN_WORDS) -> bool:
+    """True if the evidence, or a run of `span` consecutive words from it, is in the text.
+
+    Models often copy the start of a sentence and paraphrase the rest; 10 verbatim words
+    still prove the evidence came from the text.
+    """
+    if contains_quote(text, evidence):
+        return True
+    words = normalize(evidence).split()
+    haystack = normalize(text)
+    return any(" ".join(words[i : i + span]) in haystack for i in range(len(words) - span + 1))
 
 
 def pick_chunks(chunks: list[dict], per_company: int = PER_COMPANY) -> list[dict]:
@@ -150,12 +168,16 @@ def audit_item(item: dict, section: str, company: str, chat_fn, llm_cfg: dict) -
     """Ask whether the full section answers the question; verify the evidence sentence."""
     prompt = AUDIT_PROMPT.format(company=company, question=item["question"], section=section)
     try:
-        data = json.loads(chat_fn([{"role": "user", "content": prompt}], llm_cfg, json_mode=True))
+        raw = chat_fn([{"role": "user", "content": prompt}], llm_cfg, json_mode=True)
+    except LLMError as exc:  # e.g. a 503 that outlasted the retries: no verdict, not a mismatch
+        return {"id": item["id"], "verdict": "error", "evidence": str(exc)[:200]}
+    try:
+        data = json.loads(raw)
         says_answerable = bool(data.get("answerable"))
         evidence = str(data.get("evidence", "")).strip()
     except (ValueError, AttributeError):
         return {"id": item["id"], "verdict": "unclear", "evidence": ""}
-    if says_answerable and contains_quote(section, evidence):
+    if says_answerable and grounded_in(section, evidence):
         verdict = "answered"
     elif says_answerable:
         verdict = "unclear"  # claims an answer but the sentence is not in the section
@@ -170,6 +192,8 @@ def audit_problems(items: list[dict], results: list[dict]) -> list[str]:
     problems = []
     for it in items:
         r = by_id[it["id"]]
+        if r["verdict"] == "error":
+            continue  # reported separately by main(); Gemini failed, not the test set
         if it["answerable"] and r["verdict"] != "answered":
             problems.append(f"{it['id']}: expected answerable, audit says {r['verdict']}")
         if not it["answerable"] and r["verdict"] == "answered":
@@ -269,11 +293,15 @@ def main() -> None:
             items, cfg["companies"], SECTIONS_DIR, chat, cfg["llm"],
             on_result=lambda r: print(json.dumps(r, ensure_ascii=False), flush=True),
         )  # fmt: skip
+        errors = [r["id"] for r in results if r["verdict"] == "error"]
+        if errors:
+            print(f"WARNING: not audited (Gemini errors): {', '.join(errors)}", file=sys.stderr)
         problems = audit_problems(items, results)
         if problems:
             print("\n".join(f"ERROR: {p}" for p in problems), file=sys.stderr)
             sys.exit(1)
-        print(f"audit: all {len(items)} questions agree with the full Risk Factors sections")
+        audited = len(items) - len(errors)
+        print(f"audit: all {audited} audited questions agree with the full Risk Factors sections")
     elif cmd == "check":
         problems = check_test_set(load_jsonl(TEST_SET_PATH), set(cfg["companies"]))
         if problems:

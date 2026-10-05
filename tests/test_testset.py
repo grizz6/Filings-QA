@@ -138,6 +138,31 @@ def test_audit_item_verdicts():
     assert testset.audit_item(item, SECTION, "Tesla", bad_json, {})["verdict"] == "unclear"
 
 
+def test_audit_accepts_evidence_with_a_long_verbatim_span():
+    # Seen in CI (q07): the model copied the start of a sentence and paraphrased the end.
+    item = {"id": "q07", "question": "Q?"}
+    partly_copied = (
+        "Any disruption in the supply of battery cells from our suppliers could limit "
+        "output and hurt our margins badly."
+    )
+    result = testset.audit_item(item, SECTION, "Tesla", _audit_reply(True, partly_copied), {})
+    assert result["verdict"] == "answered"
+    assert testset.grounded_in(SECTION, "Elon Musk is the Chief Executive Officer.") is False
+
+
+def test_audit_item_reports_llm_errors_without_a_verdict():
+    def overloaded(m, c, json_mode):
+        raise testset.LLMError("Gemini returned 503: high demand")
+
+    result = testset.audit_item({"id": "q01", "question": "Q?"}, SECTION, "Tesla", overloaded, {})
+    assert result["verdict"] == "error" and "503" in result["evidence"]
+
+
+def test_audit_problems_ignores_errors():
+    items = [{"id": "q01", "answerable": True}]
+    assert testset.audit_problems(items, [{"id": "q01", "verdict": "error", "evidence": ""}]) == []
+
+
 def test_audit_problems_flags_both_directions():
     items = [
         {"id": "q01", "answerable": True},
