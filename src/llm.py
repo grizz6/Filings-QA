@@ -18,7 +18,7 @@ import requests
 
 from src.config import load_config
 
-TIMEOUT_SECONDS = 60
+TIMEOUT_SECONDS = 120  # a whole Risk Factors section (~20k tokens) can take over 60 s
 RETRY_STATUSES = (429, 500, 503)  # rate limited, or the model is temporarily overloaded
 MAX_RETRIES = 5
 MAX_WAIT_SECONDS = 90

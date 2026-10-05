@@ -177,13 +177,18 @@ def audit_problems(items: list[dict], results: list[dict]) -> list[str]:
     return problems
 
 
-def run_audit(items, companies, sections_dir, chat_fn, llm_cfg, sleep=time.sleep) -> list[dict]:
+def run_audit(
+    items, companies, sections_dir, chat_fn, llm_cfg, sleep=time.sleep, on_result=None
+) -> list[dict]:
+    """Audit every item; on_result sees each verdict as soon as it arrives (for live logs)."""
     results = []
     for i, it in enumerate(items):
         if i:
             sleep(AUDIT_SECONDS_BETWEEN_CALLS)
         section = (sections_dir / f"{it['ticker']}.txt").read_text()
         results.append(audit_item(it, section, companies[it["ticker"]], chat_fn, llm_cfg))
+        if on_result:
+            on_result(results[-1])
     return results
 
 
@@ -260,9 +265,10 @@ def main() -> None:
         from src.llm import chat
 
         items = load_jsonl(TEST_SET_PATH)
-        results = run_audit(items, cfg["companies"], SECTIONS_DIR, chat, cfg["llm"])
-        for r in results:
-            print(json.dumps(r, ensure_ascii=False))
+        results = run_audit(
+            items, cfg["companies"], SECTIONS_DIR, chat, cfg["llm"],
+            on_result=lambda r: print(json.dumps(r, ensure_ascii=False), flush=True),
+        )  # fmt: skip
         problems = audit_problems(items, results)
         if problems:
             print("\n".join(f"ERROR: {p}" for p in problems), file=sys.stderr)

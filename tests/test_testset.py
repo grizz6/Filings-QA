@@ -163,3 +163,14 @@ def test_run_audit_reads_each_company_section(tmp_path):
         items, {"TSLA": "Tesla"}, tmp_path, _audit_reply(True, ceo), {}, sleep=lambda s: None
     )
     assert results == [{"id": "q01", "verdict": "answered", "evidence": ceo}]
+
+
+def test_run_audit_reports_each_result_as_it_goes(tmp_path):
+    (tmp_path / "TSLA.txt").write_text(SECTION)
+    items = [{"id": f"q0{i}", "ticker": "TSLA", "question": "Q?"} for i in (1, 2)]
+    seen = []
+    testset.run_audit(
+        items, {"TSLA": "Tesla"}, tmp_path, _audit_reply(False), {},
+        sleep=lambda s: None, on_result=seen.append,
+    )  # fmt: skip
+    assert [r["id"] for r in seen] == ["q01", "q02"]
