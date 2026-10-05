@@ -30,7 +30,7 @@ chunking:
   overlap_words: 50
 
 retrieval:
-  top_k: 5
+  top_k: 8  # Day 7: k=8 found the quote for 36/40 test questions vs 33/40 at k=5
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
 
 llm:
