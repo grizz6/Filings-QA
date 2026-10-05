@@ -158,9 +158,32 @@ def test_audit_item_reports_llm_errors_without_a_verdict():
     assert result["verdict"] == "error" and "503" in result["evidence"]
 
 
-def test_audit_problems_ignores_errors():
-    items = [{"id": "q01", "answerable": True}]
-    assert testset.audit_problems(items, [{"id": "q01", "verdict": "error", "evidence": ""}]) == []
+def test_audit_problems_ignores_a_few_errors_but_not_many():
+    items = [{"id": f"q{i:02d}", "answerable": True} for i in range(10)]
+    err = [{"id": f"q{i:02d}", "verdict": "error", "evidence": ""} for i in range(10)]
+    ok = [{"id": f"q{i:02d}", "verdict": "answered", "evidence": "x"} for i in range(10)]
+    few = err[: testset.MAX_AUDIT_ERRORS] + ok[testset.MAX_AUDIT_ERRORS :]
+    assert testset.audit_problems(items, few) == []
+    many = err[: testset.MAX_AUDIT_ERRORS + 1] + ok[testset.MAX_AUDIT_ERRORS + 1 :]
+    assert testset.audit_problems(items, many) == [
+        f"{testset.MAX_AUDIT_ERRORS + 1} questions could not be audited (Gemini errors)"
+    ]
+
+
+def test_run_audit_stops_once_too_many_calls_fail(tmp_path):
+    # Seen in CI: the daily free-tier quota ran out, so every call failed.
+    (tmp_path / "TSLA.txt").write_text(SECTION)
+    items = [{"id": f"q{i:02d}", "ticker": "TSLA", "question": "Q?"} for i in range(20)]
+    calls = []
+
+    def no_quota(m, c, json_mode):
+        calls.append(1)
+        raise testset.LLMError("Gemini daily free-tier quota is used up")
+
+    results = testset.run_audit(
+        items, {"TSLA": "Tesla"}, tmp_path, no_quota, {}, sleep=lambda s: None
+    )
+    assert len(calls) == len(results) == testset.MAX_AUDIT_ERRORS + 1
 
 
 def test_audit_problems_flags_both_directions():

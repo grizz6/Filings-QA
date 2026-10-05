@@ -18,7 +18,8 @@ The audit gives Gemini the company's ENTIRE Risk Factors section and asks whethe
 answers the question, with an exact supporting sentence. The sentence is checked against the
 section text, so the audit cannot be satisfied by an invented quote. It flags unanswerable
 questions that the section does answer, and answerable ones it does not support. A call that
-still fails after the retries (e.g. Gemini overloaded) is listed as a warning, not a mismatch.
+still fails after the retries (e.g. Gemini overloaded) is listed as a warning, not a mismatch;
+more than MAX_AUDIT_ERRORS such failures stop the audit and fail it.
 
 Each answerable item stores its quote, so a retrieved chunk counts as correct when it
 contains the quote. That keeps the test set valid when chunk sizes (and IDs) change.
@@ -45,6 +46,9 @@ SECONDS_BETWEEN_CALLS = 5  # free tier allows ~15 requests/minute for gemini-3.1
 # Audit calls send a whole Risk Factors section (up to ~20k tokens), so they are spaced
 # further apart to stay under the free tier's tokens-per-minute limit.
 AUDIT_SECONDS_BETWEEN_CALLS = 7
+# A few failed calls (Gemini overloaded) are tolerated; more means the audit proved nothing
+# (e.g. the daily quota ran out), so it stops early and fails.
+MAX_AUDIT_ERRORS = 5
 EXPECTED_ANSWERABLE = 40
 EXPECTED_UNANSWERABLE = 10
 
@@ -189,6 +193,9 @@ def audit_item(item: dict, section: str, company: str, chat_fn, llm_cfg: dict) -
 def audit_problems(items: list[dict], results: list[dict]) -> list[str]:
     """Mismatches between what the test set says and what the full-section audit found."""
     by_id = {r["id"]: r for r in results}
+    errors = sum(r["verdict"] == "error" for r in results)
+    if errors > MAX_AUDIT_ERRORS:
+        return [f"{errors} questions could not be audited (Gemini errors)"]
     problems = []
     for it in items:
         r = by_id[it["id"]]
@@ -213,6 +220,8 @@ def run_audit(
         results.append(audit_item(it, section, companies[it["ticker"]], chat_fn, llm_cfg))
         if on_result:
             on_result(results[-1])
+        if sum(r["verdict"] == "error" for r in results) > MAX_AUDIT_ERRORS:
+            break
     return results
 
 
