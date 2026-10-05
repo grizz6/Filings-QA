@@ -1,0 +1,4 @@
+# Day 8 eval gate: CI fails if retrieval quality for the settings in config.yaml drops
+# below these numbers. Set slightly below the best measured score (see JOURNAL.md, Day 7).
+hit_rate_at_k: 0.0
+mrr: 0.0

@@ -92,3 +92,6 @@ def test_experiments_and_thresholds_files_are_valid():
     assert len(exps) == 3
     for params in exps.values():
         assert set(params) == {"size_words", "overlap_words", "top_k"}
+    thresholds = yaml.safe_load(evaluate.THRESHOLDS_PATH.read_text())
+    assert set(thresholds) == set(evaluate.GATED_METRICS)
+    assert all(0 <= v <= 1 for v in thresholds.values())
