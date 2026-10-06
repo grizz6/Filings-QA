@@ -48,7 +48,8 @@ def test_summarize_fills_every_day_and_lists_recent_first():
     assert [d["questions"] for d in s["daily"]] == [1, 0, 1]
     assert s["daily"][0]["refused"] == 1
     assert s["daily"][1]["latency_p50_ms"] is None
-    assert [r["question"] for r in s["recent"]] == ["new", "old"]
+    assert [r["status"] for r in s["recent"]] == ["answered", "refused"]  # newest first
+    assert all("question" not in r for r in s["recent"])  # stats are public: no visitor text
 
 
 def test_summarize_empty_period():
@@ -147,3 +148,9 @@ def test_main_writes_the_report_to_the_job_summary(monkeypatch, tmp_path, capsys
     monitor.main()
     assert "| Questions | 1 |" in capsys.readouterr().out
     assert "| Questions | 1 |" in (tmp_path / "summary.md").read_text()
+
+
+def test_question_log_table_has_row_level_security():
+    # Supabase exposes public tables through its Data API; RLS with no policies blocks that
+    # path while the app's own database role (the table owner) keeps full access.
+    assert "ENABLE ROW LEVEL SECURITY" in monitor.RLS_SQL and "qa_log" in monitor.RLS_SQL

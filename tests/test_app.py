@@ -28,7 +28,7 @@ STATS = {
     "latency_p50_ms": 2100, "latency_p95_ms": 4800,
     "daily": [{"date": f"2026-10-{d:02d}", "questions": d % 3, "refused": 0, "errors": 0,
                "latency_p50_ms": 2000 if d % 3 else None} for d in range(1, 15)],
-    "recent": [{"ts": "2026-10-06T12:00:00+00:00", "question": "Q?", "status": "answered",
+    "recent": [{"ts": "2026-10-06T12:00:00+00:00", "status": "answered",
                 "top_score": 0.6, "latency_ms": 2100}],
 }  # fmt: skip
 
@@ -253,3 +253,12 @@ def test_in_process_api_is_rebuilt_when_secrets_arrive(monkeypatch):
     monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://u:p@host:5432/db")
     assert client._local_api() is not first
     client._build_local_api.cache_clear()
+
+
+def test_answer_text_cannot_render_images_or_links():
+    # The answer comes from a model that also read the user's question: keep it plain text.
+    text = "Risk [1]. ![x](http://evil.test/p.png) See [here](http://evil.test) and <b>hi</b>"
+    safe = client.safe_markdown(text)
+    assert "http://evil.test" not in safe and "![" not in safe
+    assert "Risk [1]." in safe and "here" in safe
+    assert "<b>" not in safe

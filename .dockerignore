@@ -1,9 +1,6 @@
 # Only what the image needs; never secrets or local data.
 *
 !Dockerfile
-!requirements.txt
-!requirements-index.txt
-!requirements-app.txt
 !config.yaml
 !start.sh
 !.streamlit/

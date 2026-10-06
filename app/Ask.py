@@ -1,7 +1,7 @@
 """Ask page: question in, cited answer out."""
 
 import streamlit as st
-from client import ApiError, call, load_config, setup_problems
+from client import ApiError, call, load_config, safe_markdown, setup_problems
 
 EXAMPLES = [
     "What does Tesla say about supply chain risk?",
@@ -63,7 +63,7 @@ if submitted and question.strip():
             "(they cover risks, not figures like revenue or names of executives)."
         )
     else:
-        st.markdown(result["answer"])
+        st.markdown(safe_markdown(result["answer"]))
         st.markdown("**Sources**")
         for c in result["citations"]:
             st.markdown(

@@ -38,6 +38,9 @@ SCHEMA_SQL = """CREATE TABLE IF NOT EXISTS qa_log (
     error       text
 )"""
 INDEX_SQL = "CREATE INDEX IF NOT EXISTS qa_log_source_ts ON qa_log (source, ts)"
+# Supabase serves tables in the public schema through its Data API. Row-level security with
+# no policies closes that path; the app connects as the table owner, which RLS does not limit.
+RLS_SQL = "ALTER TABLE qa_log ENABLE ROW LEVEL SECURITY"
 COLUMNS = ("question", "tickers", "status", "n_citations", "top_score", "latency_ms", "model",
            "error")  # fmt: skip
 RECENT_ROWS = 20
@@ -75,6 +78,7 @@ class PgLog:
         if not self._schema_ready:
             conn.execute(SCHEMA_SQL)
             conn.execute(INDEX_SQL)
+            conn.execute(RLS_SQL)
             conn.commit()
             self._schema_ready = True
         return conn
@@ -152,10 +156,10 @@ def summarize(rows: list[dict], days: int, now: datetime, low_score: float) -> d
         "latency_p50_ms": percentile([r["latency_ms"] for r in replied], 50),
         "latency_p95_ms": percentile([r["latency_ms"] for r in replied], 95),
         "daily": daily,
+        # Question text stays in the database only: these stats are shown publicly.
         "recent": [
             {
                 "ts": r["ts"].isoformat(timespec="seconds"),
-                "question": r["question"],
                 "status": r["status"],
                 "top_score": r["top_score"],
                 "latency_ms": r["latency_ms"],

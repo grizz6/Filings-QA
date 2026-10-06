@@ -104,7 +104,10 @@ score. The Monitoring page and a weekly report summarize:
   data or tune retrieval.
 
 The app also has guardrails for a public deployment: question length limits, a daily
-question budget, and error messages that never expose internals.
+question budget, error messages that never expose internals, answers rendered as plain text
+with citations, and visitors' question text kept private (public views show outcomes and
+timing only). Database tables are closed to Supabase's public Data API with row-level
+security.
 
 ## Tools and what each one brings
 
@@ -131,7 +134,7 @@ question budget, and error messages that never expose internals.
 src/        download, parse, chunk, index, retrieve, answer, llm, testset,
             evaluate, api (FastAPI), monitor (question log and summaries)
 app/        Streamlit UI: Ask page and Monitoring page
-eval/       test set, experiment grid, quality thresholds, demo questions
+eval/       test set, experiment grid, quality thresholds
 checks/     live check of the hosted app
 tests/      unit tests, including the API and both UI pages
 .github/    workflows for CI, data, evaluation, the app and monitoring

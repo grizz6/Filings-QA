@@ -9,6 +9,7 @@ Two ways to reach the API (src/api.py), with the same validation, limits and log
 from __future__ import annotations
 
 import os
+import re
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -90,6 +91,14 @@ def setup_problems() -> list[str]:
     return [name for name, flag in flags.items() if not health.get(flag)]
 
 
+def safe_markdown(text: str) -> str:
+    """Model output as plain text with [n] citations: no images, outside links or HTML."""
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)  # images
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)  # [label](url) -> label
+    text = re.sub(r"<[^>]+>", "", text)  # HTML tags
+    return re.sub(r"https?://\S+", "", text).strip()
+
+
 def series_color() -> str:
     """Categorical slot 1 (blue), stepped for the active light or dark theme."""
     try:
@@ -102,4 +111,12 @@ def series_color() -> str:
     return "#2a78d6"
 
 
-__all__ = ["ApiError", "call", "load_config", "secrets_to_env", "series_color", "setup_problems"]
+__all__ = [
+    "ApiError",
+    "call",
+    "load_config",
+    "safe_markdown",
+    "secrets_to_env",
+    "series_color",
+    "setup_problems",
+]
