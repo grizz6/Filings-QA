@@ -1,3 +1,5 @@
 -r requirements.txt
 pytest>=8.0
 ruff>=0.6
+fastapi>=0.115  # API tests (no PyTorch needed: retrieval is faked)
+httpx>=0.27     # FastAPI's TestClient
