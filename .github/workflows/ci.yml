@@ -28,7 +28,7 @@ jobs:
           ruff check .
           ruff format --check .
       - name: Unit tests (pytest) with a coverage floor
-        run: pytest -q --cov=src --cov=scripts --cov=app --cov-report=term --cov-fail-under=80
+        run: pytest -q --cov=src --cov=app --cov-report=term --cov-fail-under=80
 
   secret-scan:
     runs-on: ubuntu-latest

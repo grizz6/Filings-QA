@@ -56,6 +56,7 @@ def api(monkeypatch):
             raise result
         return Resp(*result)
 
+    monkeypatch.setattr(client, "API_URL", "http://api.test")  # HTTP mode, as in Docker
     monkeypatch.setattr(requests, "request", fake_request)
     routes["_seen"] = seen
     return routes
@@ -158,3 +159,61 @@ def test_monitoring_page_when_api_is_down(api):
     api["/stats"] = requests.ConnectionError("refused")
     at = page("pages/1_Monitoring.py")
     assert "not reachable" in at.warning[0].value
+
+
+def test_without_api_url_the_api_runs_in_this_process(monkeypatch):
+    # Streamlit Community Cloud runs one process: the UI calls the same FastAPI app in-process.
+    from fastapi.testclient import TestClient
+
+    from src import api, monitor
+
+    def fake_answer(q):
+        return {"question": q, "answer": "Risk [1].", "refused": False,
+                "citations": [{"n": 1, "id": "TSLA_1A_0002", "source_url": "https://sec/t"}],
+                "chunks": [{"id": "TSLA_1A_0002", "ticker": "TSLA", "text": "t",
+                            "source_url": "https://sec/t", "score": 0.6}]}  # fmt: skip
+
+    local = TestClient(api.create_app(answer_fn=fake_answer, log=monitor.MemoryLog()))
+    monkeypatch.setattr(client, "API_URL", "")
+    monkeypatch.setattr(client, "_local_api", lambda: local)
+    monkeypatch.setattr(requests, "request", lambda *a, **k: pytest.fail("no HTTP expected"))
+    body = client.call("POST", "/ask", json={"question": "Tesla supply risk?"})
+    assert body["answer"] == "Risk [1]."
+    with pytest.raises(client.ApiError, match="String should have at least 3 characters"):
+        client.call("POST", "/ask", json={"question": "hi"})  # same validation as over HTTP
+    assert client.call("GET", "/stats", params={"days": 7})["total"] == 1
+
+
+def test_streamlit_secrets_become_environment_variables(monkeypatch):
+    import streamlit
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("SUPABASE_DB_URL", "already-set")
+    secrets = {"GEMINI_API_KEY": "from-secrets", "SUPABASE_DB_URL": "from-secrets"}
+    monkeypatch.setattr(streamlit, "secrets", secrets)
+    client.secrets_to_env()
+    assert client.os.environ["GEMINI_API_KEY"] == "from-secrets"
+    assert client.os.environ["SUPABASE_DB_URL"] == "already-set"  # env wins, e.g. Docker
+
+
+def test_missing_streamlit_secrets_are_fine(monkeypatch):
+    import streamlit
+
+    class NoSecrets:
+        def __contains__(self, key):
+            raise FileNotFoundError("no secrets.toml")
+
+    monkeypatch.setattr(streamlit, "secrets", NoSecrets())
+    client.secrets_to_env()  # does not raise
+
+
+def test_streamlit_cloud_requirements_cover_the_app():
+    # Streamlit Community Cloud installs app/requirements.txt (next to the entrypoint).
+    import re
+
+    lines = (ROOT / "app" / "requirements.txt").read_text().splitlines()
+    names = {re.split(r"[<>=\[ ]", ln)[0].lower() for ln in lines if ln and ln[0].isalpha()}
+    needed = {"requests", "pyyaml", "numpy", "sentence-transformers", "psycopg", "pgvector",
+              "fastapi", "httpx", "streamlit"}  # fmt: skip
+    assert needed <= names, needed - names
+    assert any("download.pytorch.org/whl/cpu" in ln for ln in lines)  # small CPU-only PyTorch
