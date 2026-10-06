@@ -1,0 +1,44 @@
+name: Live app check
+
+# Opens the deployed app in a headless browser like a visitor, asks a question and checks
+# that a cited answer appears. Prints what the page shows and uploads a screenshot.
+on:
+  workflow_dispatch:
+    inputs:
+      question:
+        description: Question to ask the live app
+        required: false
+  schedule:
+    - cron: "37 7 * * 1"  # Mondays 07:37 UTC, after the weekly monitor
+  pull_request:
+    paths:
+      - checks/live_check.py
+      - .github/workflows/live-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    env:
+      APP_URL: ${{ vars.APP_URL || 'https://filings.streamlit.app' }}
+      QUESTION: ${{ inputs.question }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Playwright with Chromium
+        run: |
+          pip install "playwright>=1.45"
+          python -m playwright install --with-deps chromium
+      - name: Ask the live app
+        run: python checks/live_check.py
+      - name: Screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-check
+          path: live-check.png
+          if-no-files-found: ignore
