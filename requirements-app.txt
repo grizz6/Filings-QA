@@ -1,0 +1,5 @@
+# Web app (Day 9): API + UI on top of the retrieval stack. Used by the Docker image.
+-r requirements-index.txt
+fastapi>=0.115
+uvicorn>=0.30
+streamlit>=1.40

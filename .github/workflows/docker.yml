@@ -1,0 +1,62 @@
+name: Docker image
+
+# Day 9: build the app image exactly as Hugging Face Spaces will, run it, and check that
+# the API answers one real question with citations (1 Gemini call) and the UI is up.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - start.sh
+      - requirements*.txt
+      - config.yaml
+      - src/**
+      - app/**
+      - .streamlit/**
+      - .github/workflows/docker.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build -t filings-qa .
+      - name: Run (questions logged as source "ci", kept out of the dashboard)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: >
+          docker run -d --name app -p 7860:7860 -p 8000:8000
+          -e GEMINI_API_KEY -e SUPABASE_DB_URL -e LOG_SOURCE=ci filings-qa
+      - name: Wait for the API and the UI
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf localhost:8000/health && curl -sf localhost:7860/_stcore/health; then
+              echo; exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Ask one question end to end
+        run: |
+          curl -sS -X POST localhost:8000/ask -H 'Content-Type: application/json' \
+            -d '{"question": "What does Tesla say about supply chain risk?"}' -o answer.json -w '%{http_code}\n'
+          python3 -c '
+          import json
+          r = json.load(open("answer.json"))
+          print(json.dumps(r, indent=2)[:1500])
+          assert not r.get("refused", True) and r["citations"], "expected a cited answer"
+          assert all(c["ticker"] == "TSLA" for c in r["citations"])
+          '
+      - name: Container logs
+        if: always()
+        run: docker logs app 2>&1 | tail -50

@@ -1,0 +1,59 @@
+name: Deploy to Hugging Face Spaces
+
+# Day 9: on every change to the app on main, push it to a Hugging Face Space (Docker SDK)
+# and wait until the live UI is healthy. Needs the HF_TOKEN secret (a write token from
+# huggingface.co -> Settings -> Access Tokens). Optional repo variable HF_SPACE
+# ("user/name"); the default is "<your HF user>/filings-qa".
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - start.sh
+      - requirements*.txt
+      - config.yaml
+      - src/**
+      - app/**
+      - .streamlit/**
+      - space/**
+      - scripts/deploy_space.py
+      - .github/workflows/deploy.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for HF_TOKEN
+        id: token
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::notice::HF_TOKEN is not set, so nothing was deployed. Add it under Settings -> Secrets and variables -> Actions."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.skip != 'true'
+      - uses: actions/setup-python@v5
+        if: steps.token.outputs.skip != 'true'
+        with:
+          python-version: "3.11"
+      - if: steps.token.outputs.skip != 'true'
+        run: pip install "huggingface_hub>=0.24" requests
+      - name: Deploy and wait for the Space
+        if: steps.token.outputs.skip != 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: python -m scripts.deploy_space
