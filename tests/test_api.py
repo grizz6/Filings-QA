@@ -137,3 +137,68 @@ def test_stats_summarizes_the_log(log):
     assert body["total"] == 2 and body["refusal_rate"] == 0.5
     assert len(body["daily"]) == 7
     assert c.get("/stats", params={"days": 0}).status_code == 422
+
+
+def test_real_answer_pipeline_is_wired_end_to_end(monkeypatch):
+    # create_app() without answer_fn uses the real answer() -> retrieve() -> chat() chain;
+    # only the vector search and the Gemini HTTP call are faked.
+    from src import index, llm
+    from src.config import load_config
+
+    cfg = load_config()
+    searched = {}
+
+    def fake_query(text, index_name, tickers, k):
+        searched.update(index_name=index_name, tickers=tickers, k=k)
+        return [("TSLA_1A_0002", "TSLA", "Tesla depends on suppliers.", "https://sec/t", 0.61)]
+
+    class GeminiReply:
+        status_code = 200
+        text = ""
+        headers = {}
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "Supplier risk [1]."}]}}]}
+
+    monkeypatch.setattr(index, "query", fake_query)
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(llm.requests, "post", lambda *a, **k: GeminiReply())
+    c = TestClient(api.create_app(log=monitor.MemoryLog(), cfg=cfg))
+    body = c.post("/ask", json={"question": "What does Tesla say about suppliers?"}).json()
+    assert body["answer"] == "Supplier risk [1]."
+    assert body["citations"][0]["id"] == "TSLA_1A_0002"
+    assert searched == {"index_name": "main", "tickers": ["TSLA"], "k": cfg["retrieval"]["top_k"]}
+
+
+def test_without_database_the_log_falls_back_to_memory(monkeypatch):
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    assert isinstance(api._default_log(), monitor.MemoryLog)
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://u:p@host:5432/db")
+    log = api._default_log()  # no connection is made until the first question
+    assert isinstance(log, monitor.PgLog) and "sslmode=require" in log.url
+
+
+def test_unreadable_log_does_not_block_questions():
+    class CountFails(monitor.MemoryLog):
+        def count_since(self, since):
+            raise ConnectionError("database down")
+
+    r = client(CountFails()).post("/ask", json={"question": "Tesla supply risk?"})
+    assert r.status_code == 200
+
+
+def test_llm_outage_that_is_not_quota_returns_503_try_again(log):
+    def overloaded(q):
+        raise LLMError("Gemini returned 503: high demand")
+
+    r = client(log, answer_fn=overloaded).post("/ask", json={"question": "Tesla supply risk?"})
+    assert r.status_code == 503
+    assert "unavailable right now" in r.json()["detail"]
+
+
+def test_module_level_app_is_built_lazily(monkeypatch):
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    monkeypatch.delitem(api.__dict__, "app", raising=False)
+    assert TestClient(api.app).get("/health").status_code == 200
+    with pytest.raises(AttributeError):
+        api.not_a_thing  # noqa: B018
