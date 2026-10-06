@@ -1,7 +1,7 @@
 """Ask page: question in, cited answer out."""
 
 import streamlit as st
-from client import ApiError, call, load_config
+from client import ApiError, call, load_config, setup_problems
 
 EXAMPLES = [
     "What does Tesla say about supply chain risk?",
@@ -19,6 +19,18 @@ st.write(
     "these companies. Answers come only from the filings and cite them."
 )
 st.caption(" · ".join(f"{name} ({t})" for t, name in cfg["companies"].items()))
+
+try:
+    missing = setup_problems()
+except ApiError as exc:
+    st.warning(str(exc))
+    missing = []
+if missing:
+    st.error(
+        f"**Setup incomplete:** missing {' and '.join(f'`{m}`' for m in missing)}. "
+        "App owner: add them in Streamlit Cloud under **Manage app → Settings → Secrets** "
+        "(or as environment variables), then reboot the app."
+    )
 
 if "question" not in st.session_state:
     st.session_state.question = ""

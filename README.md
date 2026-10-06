@@ -105,6 +105,11 @@ One-time setup; afterwards every push to `main` redeploys automatically.
    ```
 4. Deploy. Dependencies come from `app/requirements.txt`; the first build takes a few minutes.
 
+Secrets can be added or changed later: on share.streamlit.io, open the app's **⋮** menu →
+**Settings** → **Secrets**. They are stored encrypted by Streamlit, never in the repository,
+and visitors cannot read them; the app only reports whether each one is set. If one is
+missing, the Ask page says which.
+
 Why not Hugging Face Spaces: since July 2026, Docker and Gradio Spaces on the free CPU tier
 need a paid PRO plan (the deploy got HTTP 402), and only static Spaces stay free.
 

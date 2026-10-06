@@ -57,6 +57,8 @@ def api(monkeypatch):
         return Resp(*result)
 
     monkeypatch.setattr(client, "API_URL", "http://api.test")  # HTTP mode, as in Docker
+    routes["/health"] = (200, {"status": "ok", "model": "m", "top_k": 8,
+                               "llm_key_configured": True, "db_configured": True})  # fmt: skip
     monkeypatch.setattr(requests, "request", fake_request)
     routes["_seen"] = seen
     return routes
@@ -217,3 +219,37 @@ def test_streamlit_cloud_requirements_cover_the_app():
               "fastapi", "httpx", "streamlit"}  # fmt: skip
     assert needed <= names, needed - names
     assert any("download.pytorch.org/whl/cpu" in ln for ln in lines)  # small CPU-only PyTorch
+
+
+def test_setup_problems_name_missing_secrets(api):
+    health = {"status": "ok", "model": "m", "top_k": 8}
+    api["/health"] = (200, {**health, "llm_key_configured": False, "db_configured": True})
+    assert client.setup_problems() == ["GEMINI_API_KEY"]
+    api["/health"] = (200, {**health, "llm_key_configured": True, "db_configured": True})
+    assert client.setup_problems() == []
+
+
+def test_ask_page_explains_missing_secrets(api):
+    api["/health"] = (200, {"status": "ok", "model": "m", "top_k": 8,
+                            "llm_key_configured": False, "db_configured": False})  # fmt: skip
+    at = page("Ask.py")
+    assert "GEMINI_API_KEY" in at.error[0].value and "SUPABASE_DB_URL" in at.error[0].value
+    assert "Secrets" in at.error[0].value
+
+
+def test_ask_page_has_no_setup_error_when_configured(api):
+    at = page("Ask.py")  # the api fixture's default /health reports both secrets set
+    assert len(at.error) == 0
+
+
+def test_in_process_api_is_rebuilt_when_secrets_arrive(monkeypatch):
+    # Streamlit Cloud: the app can start before secrets are saved; it must not stay stuck
+    # with an in-memory log once SUPABASE_DB_URL appears.
+    monkeypatch.setattr(client, "secrets_to_env", lambda: None)
+    monkeypatch.delenv("SUPABASE_DB_URL", raising=False)
+    client._build_local_api.cache_clear()
+    first = client._local_api()
+    assert client._local_api() is first  # cached while nothing changes
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://u:p@host:5432/db")
+    assert client._local_api() is not first
+    client._build_local_api.cache_clear()
