@@ -49,6 +49,8 @@ def schema_sql(dim: int) -> list[str]:
         "CREATE INDEX IF NOT EXISTS chunks_index_ticker ON chunks (index_name, ticker)",
         "CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw "
         "ON chunks USING hnsw (embedding vector_cosine_ops)",
+        # Close Supabase's Data API path to this table; the owner role used here is unaffected.
+        "ALTER TABLE chunks ENABLE ROW LEVEL SECURITY",
     ]
 
 

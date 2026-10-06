@@ -11,8 +11,8 @@ ENV API_URL=http://localhost:8000 \
 RUN useradd -m -u 1000 user
 WORKDIR /home/user/app
 
-COPY requirements.txt requirements-index.txt requirements-app.txt ./
-RUN pip install -r requirements-app.txt
+COPY app/requirements.txt ./requirements.txt
+RUN pip install -r requirements.txt "uvicorn>=0.30"
 
 USER user
 # Bake the embedding model into the image so the first question does not download it.

@@ -80,6 +80,7 @@ with right:
     st.altair_chart(line, width="stretch")
 
 st.subheader("Recent questions")
+st.caption("Outcome and timing only; question text is not shown publicly.")
 recent = pd.DataFrame(s["recent"])
 recent["ts"] = pd.to_datetime(recent["ts"]).dt.strftime("%Y-%m-%d %H:%M")
 st.dataframe(

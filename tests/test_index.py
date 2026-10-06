@@ -117,3 +117,7 @@ def test_search_filters_by_ticker_list():
     assert "ticker = ANY(%s)" in sql
     assert params == ([0.1], "main", ["TSLA", "AAPL"], ["TSLA", "AAPL"], [0.1], 5)
     assert rows[0][0] == "TSLA_1A_0000"
+
+
+def test_chunks_table_has_row_level_security():
+    assert "ALTER TABLE chunks ENABLE ROW LEVEL SECURITY" in index.schema_sql(384)
