@@ -42,13 +42,22 @@ def secrets_to_env() -> None:
         pass
 
 
-@lru_cache(maxsize=1)
 def _local_api():
+    """The in-process API, rebuilt when the secrets it was built with change.
+
+    On Streamlit Cloud the app can start before its secrets are saved; caching on which
+    secrets are present keeps it from staying stuck without the database.
+    """
+    secrets_to_env()
+    return _build_local_api(tuple(bool(os.environ.get(name, "").strip()) for name in SECRETS))
+
+
+@lru_cache(maxsize=4)
+def _build_local_api(secrets_present: tuple[bool, ...]):
     from fastapi.testclient import TestClient
 
     from src.api import create_app
 
-    secrets_to_env()
     # raise_server_exceptions=False: an unexpected error becomes a 500, as over HTTP.
     return TestClient(create_app(), raise_server_exceptions=False)
 
@@ -74,6 +83,13 @@ def call(method: str, path: str, **kwargs) -> dict:
     return resp.json()
 
 
+def setup_problems() -> list[str]:
+    """Names of the secrets the API reports as missing (empty when the app is ready)."""
+    health = call("GET", "/health")
+    flags = {"GEMINI_API_KEY": "llm_key_configured", "SUPABASE_DB_URL": "db_configured"}
+    return [name for name, flag in flags.items() if not health.get(flag)]
+
+
 def series_color() -> str:
     """Categorical slot 1 (blue), stepped for the active light or dark theme."""
     try:
@@ -86,4 +102,4 @@ def series_color() -> str:
     return "#2a78d6"
 
 
-__all__ = ["ApiError", "call", "load_config", "secrets_to_env", "series_color"]
+__all__ = ["ApiError", "call", "load_config", "secrets_to_env", "series_color", "setup_problems"]
