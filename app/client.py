@@ -1,9 +1,16 @@
-"""Shared helpers for the Streamlit pages: talk to the API, read the config."""
+"""Shared helpers for the Streamlit pages: talk to the API, read the config.
+
+Two ways to reach the API (src/api.py), with the same validation, limits and logging:
+- API_URL set (Docker image): over HTTP to the API process next to the UI.
+- API_URL not set (Streamlit Community Cloud, one process): the same FastAPI app is
+  called in this process. Secrets come from Streamlit's secrets store.
+"""
 
 from __future__ import annotations
 
 import os
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 import requests
@@ -14,21 +21,48 @@ if str(ROOT) not in sys.path:
 
 from src.config import load_config  # noqa: E402
 
-API_URL = os.environ.get("API_URL", "http://localhost:8000").rstrip("/")
+API_URL = os.environ.get("API_URL", "").rstrip("/")
 TIMEOUT_SECONDS = 180  # an answer can wait out a Gemini rate limit
+SECRETS = ("GEMINI_API_KEY", "SUPABASE_DB_URL")
 
 
 class ApiError(RuntimeError):
     pass
 
 
-def call(method: str, path: str, **kwargs) -> dict:
+def secrets_to_env() -> None:
+    """Copy Streamlit secrets into the environment, where src/ reads them (env wins)."""
     try:
-        resp = requests.request(method, f"{API_URL}{path}", timeout=TIMEOUT_SECONDS, **kwargs)
-    except requests.RequestException:
-        raise ApiError(
-            "The API is not reachable. It may still be starting; retry in a minute."
-        ) from None
+        import streamlit as st
+
+        for name in SECRETS:
+            if name in st.secrets and not os.environ.get(name):
+                os.environ[name] = str(st.secrets[name])
+    except Exception:  # no secrets file (Docker, tests): the environment is the source
+        pass
+
+
+@lru_cache(maxsize=1)
+def _local_api():
+    from fastapi.testclient import TestClient
+
+    from src.api import create_app
+
+    secrets_to_env()
+    # raise_server_exceptions=False: an unexpected error becomes a 500, as over HTTP.
+    return TestClient(create_app(), raise_server_exceptions=False)
+
+
+def call(method: str, path: str, **kwargs) -> dict:
+    if not API_URL:
+        resp = _local_api().request(method, path, **kwargs)  # in-process: no network timeout
+    else:
+        try:
+            resp = requests.request(method, f"{API_URL}{path}", timeout=TIMEOUT_SECONDS, **kwargs)
+        except requests.RequestException:
+            raise ApiError(
+                "The API is not reachable. It may still be starting; retry in a minute."
+            ) from None
     if resp.status_code != 200:
         try:
             detail = resp.json().get("detail")
@@ -52,4 +86,4 @@ def series_color() -> str:
     return "#2a78d6"
 
 
-__all__ = ["ApiError", "call", "load_config", "series_color"]
+__all__ = ["ApiError", "call", "load_config", "secrets_to_env", "series_color"]

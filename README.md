@@ -6,7 +6,7 @@ chain risk?"*
 
 A retrieval-augmented generation (RAG) system built as an MLOps project: a cloud data
 pipeline, a verified 50-question test set, tracked experiments, a CI gate that blocks
-changes when retrieval quality drops, a Docker app deployed automatically, and monitoring.
+changes when retrieval quality drops, a hosted web app with a Docker build, and monitoring.
 Runs entirely on free cloud services, with no credit card and no local LLM.
 
 Companies: Apple, Microsoft, Tesla, JPMorgan Chase, Walmart, Pfizer, Exxon Mobil, Nike,
@@ -34,8 +34,9 @@ flowchart LR
    exactly "Not found in the filings." Citations link back to the 10-K on sec.gov.
 4. **Evaluation**: 40 answerable questions (each with a gold quote checked against the filing
    text) and 10 the Risk Factors sections cannot answer (revenue figures, executives' names).
-5. **App and monitoring**: FastAPI + Streamlit in one Docker image on Hugging Face Spaces;
-   every question is logged and summarized on a Monitoring page.
+5. **App and monitoring**: a Streamlit UI on top of a FastAPI API, hosted free on Streamlit
+   Community Cloud (also packaged as a Docker image); every question is logged and summarized
+   on a Monitoring page.
 
 ## Results
 
@@ -60,8 +61,7 @@ The design decisions behind these numbers are in [JOURNAL.md](JOURNAL.md).
 | `testset-verify.yml` | test set changes | every gold quote is still in its chunk |
 | `testset-audit.yml` | test set changes | Gemini re-reads each full section to confirm answerable / unanswerable labels |
 | `eval.yml` (Experiments) | eval changes, manual | runs `eval/experiments.yaml`, logs to MLflow |
-| `docker.yml` | app changes | builds the image, runs it, asks one real question end to end |
-| `deploy.yml` | push to main | deploys to Hugging Face Spaces and waits until the live app is healthy |
+| `docker.yml` (App) | app changes | asks one real question end to end two ways: in the Docker image, and installed exactly as Streamlit Cloud installs it |
 | `monitor.yml` | Mondays | re-checks the test set against the latest filings + the gate; usage report |
 | `qa-demo.yml` | manual | answers `eval/demo_questions.txt` or your own question |
 
@@ -71,26 +71,42 @@ The design decisions behind these numbers are in [JOURNAL.md](JOURNAL.md).
 - **Monitoring page**: questions per day, refusal rate, latency p50/p95, and the share of
   low-confidence retrievals (best chunk scored below 0.40). A rising low-confidence share means
   people ask about things the filings do not cover, or retrieval got worse.
-- **API** (inside the container, port 8000): `GET /health`, `POST /ask`, `GET /stats?days=14`,
-  interactive docs at `/docs`.
+- **API**: `GET /health`, `POST /ask`, `GET /stats?days=14`, interactive docs at `/docs`.
+  In the Docker image it runs as its own process on port 8000. On Streamlit Cloud (one
+  process) the UI calls the same FastAPI app in-process, so validation, limits and logging
+  are identical.
 - **Guardrails**: questions up to 500 characters, 300 questions per day in total (protects
   the free Gemini quota), errors never leak internals, and logging can never break answering.
 
 ## Secrets
 
 No secret is ever committed. `.env` is git-ignored and CI scans every push with gitleaks.
-Secrets live in **repo Settings → Secrets and variables → Actions**; the deploy copies the
-two the app needs into the Space's own encrypted secrets.
+CI secrets live in **repo Settings → Secrets and variables → Actions**; the hosted app gets
+its two secrets from Streamlit Cloud's encrypted secrets store (see Deploy).
 
 | Secret | Used for |
 |---|---|
 | `GEMINI_API_KEY` | LLM calls (Google AI Studio key) |
 | `SEC_USER_AGENT` | SEC requires `Name email` on every request |
 | `SUPABASE_DB_URL` | Postgres: vectors and the question log |
-| `HF_TOKEN` | deploying to Hugging Face Spaces (write token) |
+| `HF_TOKEN` | optional: higher Hugging Face rate limits when CI downloads the embedding model (a read token is enough) |
 
-Optional repository variable `HF_SPACE` (`user/name`) picks the Space; the default is
-`<your HF user>/filings-qa`.
+## Deploy (Streamlit Community Cloud, free)
+
+One-time setup; afterwards every push to `main` redeploys automatically.
+
+1. Go to [share.streamlit.io](https://share.streamlit.io), sign in with GitHub, click
+   **Create app** → **Deploy a public app from GitHub**.
+2. Repository `grizz6/AB-Test`, branch `main`, main file path `app/Ask.py`.
+3. **Advanced settings**: Python version **3.11**, and paste the secrets in TOML form:
+   ```toml
+   GEMINI_API_KEY = "..."
+   SUPABASE_DB_URL = "..."
+   ```
+4. Deploy. Dependencies come from `app/requirements.txt`; the first build takes a few minutes.
+
+Why not Hugging Face Spaces: since July 2026, Docker and Gradio Spaces on the free CPU tier
+need a paid PRO plan (the deploy got HTTP 402), and only static Spaces stay free.
 
 ## Run locally
 
@@ -114,6 +130,8 @@ python -m src.evaluate --gate             # config.yaml vs eval/thresholds.yaml
 # App: API on :8000 (docs at /docs), UI on :7860
 docker build -t filings-qa .
 docker run --env-file .env -p 7860:7860 -p 8000:8000 filings-qa
+# or without Docker, one process like Streamlit Cloud: API_URL unset -> API runs in-process
+pip install -r app/requirements.txt && streamlit run app/Ask.py
 ```
 
 ## Project layout
@@ -123,17 +141,16 @@ src/        download, parse, chunk, index, retrieve, answer, llm, testset, evalu
             api (FastAPI), monitor (question log + summaries)
 app/        Streamlit UI: Ask.py, pages/1_Monitoring.py
 eval/       test_set.jsonl, experiments.yaml, thresholds.yaml, demo_questions.txt
-scripts/    deploy_space.py (Hugging Face Spaces deploy)
-tests/      unit tests incl. API and UI pages (no network: SEC, Gemini, Supabase,
-            Hugging Face and embeddings are faked)
+tests/      unit tests incl. API and UI pages (no network: SEC, Gemini, Supabase and
+            embeddings are faked)
 ```
 
 ## Limitations
 
 - Only the Risk Factors section, only 10 companies, only the latest 10-K each.
 - `all-MiniLM-L6-v2` reads ~190 words of each 400-word chunk; the rest still reaches the LLM.
-- Free tiers: Gemini allows ~1,000 requests/day, and a free Space sleeps after 48 hours
-  without visitors (the first visit then takes a minute to wake it).
+- Free tiers: Gemini allows ~1,000 requests/day, and a Streamlit Cloud app sleeps after
+  12 hours without visitors (the first visit then takes a minute to wake it).
 - Not investment advice.
 
 ## Roadmap
@@ -148,5 +165,5 @@ tests/      unit tests incl. API and UI pages (no network: SEC, Gemini, Supabase
 | 6 | 50-question test set: quotes verified, full-section audit 50/50 | done |
 | 7 | Experiments in MLflow: 400-word chunks, top_k 8 → hit rate 0.900, MRR 0.612 | done |
 | 8 | CI eval gate: fails a PR if hit rate < 0.875 or MRR < 0.59 | done |
-| 9 | FastAPI + Streamlit + Docker, deployed to Hugging Face Spaces | done |
+| 9 | FastAPI + Streamlit + Docker; hosted on Streamlit Community Cloud | done |
 | 10 | Question log, Monitoring page, weekly monitor workflow, README | done |

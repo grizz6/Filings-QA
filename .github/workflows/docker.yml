@@ -1,13 +1,17 @@
-name: Docker image
+name: App
 
-# Day 9: build the app image exactly as Hugging Face Spaces will, run it, and check that
-# the API answers one real question with citations (1 Gemini call) and the UI is up.
+# Day 9: check both ways the app runs, each with one real question (1 Gemini call each):
+# - image: build the Docker image (API + UI processes), run it, ask over HTTP.
+# - streamlit-cloud: what Streamlit Community Cloud does: install app/requirements.txt on
+#   Python 3.11, start `streamlit run app/Ask.py` with no API_URL (API in-process), check
+#   the UI is up and that the in-process API answers a question.
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - Dockerfile
       - .dockerignore
+      - app/requirements.txt
       - start.sh
       - requirements*.txt
       - config.yaml
@@ -60,3 +64,42 @@ jobs:
       - name: Container logs
         if: always()
         run: docker logs app 2>&1 | tail -50
+
+  streamlit-cloud:
+    runs-on: ubuntu-latest
+    env:
+      LOG_SOURCE: ci  # keep CI questions out of the dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"  # pick 3.11 in Streamlit Cloud's advanced settings too
+      - name: Install exactly what Streamlit Cloud installs
+        run: pip install -r app/requirements.txt
+      - name: Start the UI the way Streamlit Cloud does
+        run: |
+          nohup streamlit run app/Ask.py --server.port 8501 > ui.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf localhost:8501/_stcore/health && echo && exit 0
+            sleep 2
+          done
+          cat ui.log; exit 1
+      - name: Ask one question through the in-process API
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, "app")
+          import client
+          assert client.API_URL == "", "Streamlit Cloud sets no API_URL"
+          r = client.call("POST", "/ask", json={"question": "What does Tesla say about supply chain risk?"})
+          print(r["answer"])
+          assert not r["refused"] and r["citations"], r
+          assert all(c["ticker"] == "TSLA" for c in r["citations"])
+          print("stats:", {k: client.call("GET", "/stats", params={"days": 1})[k] for k in ("total", "errors")})
+          PY
+      - name: UI log
+        if: always()
+        run: tail -30 ui.log || true

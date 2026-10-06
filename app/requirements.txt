@@ -1,0 +1,13 @@
+# Streamlit Community Cloud installs this file (it sits next to the entrypoint, app/Ask.py).
+# One process: the UI runs the API in-process (see app/client.py), so no uvicorn here.
+# CPU-only PyTorch wheels: much smaller than the default CUDA build.
+--extra-index-url https://download.pytorch.org/whl/cpu
+requests>=2.31
+pyyaml>=6.0
+numpy>=1.26
+sentence-transformers>=3.0
+psycopg[binary]>=3.2
+pgvector>=0.3
+fastapi>=0.115
+httpx>=0.27
+streamlit>=1.40

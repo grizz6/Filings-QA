@@ -215,3 +215,22 @@ are logged to MLflow (`filings-qa-retrieval`); the database is a workflow artifa
   - UI pages run headless with Streamlit's AppTest against canned API responses: answered,
     refused, API error, example buttons, Monitoring with data / empty / API down.
 - Coverage after: 81% overall; API, UI, monitoring and deploy at 89-100%. CI now fails below 80%.
+
+## Hosting change: Hugging Face Spaces -> Streamlit Community Cloud
+
+- The first real deploy failed with HTTP 402: since July 2026 Hugging Face requires a paid PRO
+  plan for Docker and Gradio Spaces on the free CPU tier; only static Spaces stay free.
+  Lesson (again, after GitHub Models on Day 1): free tiers change; check before building on one.
+- Options weighed: HF PRO ($9/month, breaks the $0 goal), HF ZeroGPU Gradio Space (free but a UI
+  rewrite and meant for GPU apps), Render free tier (512 MB RAM, too little for PyTorch plus the
+  model). Chose Streamlit Community Cloud: free, GitHub sign-in, ~1-2.7 GB RAM.
+- Streamlit Cloud runs one process, so `app/client.py` now calls the same FastAPI app
+  in-process when `API_URL` is not set (the Docker image sets it and keeps two processes).
+  One code path for validation, the daily cap, logging and error messages either way.
+- Secrets come from Streamlit's encrypted secrets store and are copied into the environment,
+  where `src/` already reads them; an existing environment variable wins.
+- `app/requirements.txt` (next to the entrypoint, where Streamlit Cloud looks) uses CPU-only
+  PyTorch. The App workflow installs exactly that file on Python 3.11, starts the UI with no
+  API_URL and asks a real question in-process, so a broken Streamlit Cloud build shows in CI.
+- Removed the Hugging Face deploy workflow and script. The Docker image stays as the portable,
+  CI-tested build for any container host.
