@@ -1,174 +1,138 @@
 # Filings Q&A
 
-Ask questions about the **Risk Factors** section of 10 companies' annual reports (10-K
-filings) and get short answers that cite the filing, e.g. *"What does Tesla say about supply
-chain risk?"*
+Ask plain-English questions about the **Risk Factors** in the annual reports (Form 10-K) of
+ten major US companies and get short answers that cite the exact passages of the filings.
 
-A retrieval-augmented generation (RAG) system built as an MLOps project: a cloud data
-pipeline, a verified 50-question test set, tracked experiments, a CI gate that blocks
-changes when retrieval quality drops, a hosted web app with a Docker build, and monitoring.
-Runs entirely on free cloud services, with no credit card and no local LLM.
+**Live app: [filings.streamlit.app](https://filings.streamlit.app)**
+
+> *"What does Tesla say about supply chain risk?"*
+>
+> Tesla faces risks regarding the availability of components and suppliers, which could lead
+> to production delays, idle facilities, and an inability to fulfill customer contracts [8]…
+>
+> [8] TSLA · `TSLA_1A_0002` · *open the 10-K*
 
 Companies: Apple, Microsoft, Tesla, JPMorgan Chase, Walmart, Pfizer, Exxon Mobil, Nike,
-Netflix, Delta Air Lines (latest 10-K of each, from SEC EDGAR).
+Netflix and Delta Air Lines (latest 10-K of each, straight from SEC EDGAR).
+
+## Goal
+
+Build a retrieval-augmented generation (RAG) system the way production ML systems are built:
+reproducible data pipelines, a verified evaluation set, tracked experiments, automated quality
+gates that block regressions, a containerized and hosted app, and monitoring in production.
+Everything runs in the cloud on free services, with no local model.
+
+## What it does
+
+- **Answers with evidence.** Every claim in an answer carries a numbered citation that links
+  to the source filing on sec.gov.
+- **Stays on the right company.** A question that names a company ("Tesla", "TSLA",
+  "JPMorgan") is answered only from that company's filing.
+- **Knows the limits of its sources.** When the filings do not contain the answer (revenue
+  figures, executives' names), it replies "Not found in the filings." instead of guessing.
+- **Shows its work.** Each answer lists the retrieved excerpts with their similarity scores.
+- **Monitors itself.** A Monitoring page tracks usage, answer rate, response time and
+  retrieval confidence over time.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-  SEC[SEC EDGAR 10-Ks] -->|download, parse Item 1A, chunk| CH[328 chunks]
+  SEC[SEC EDGAR 10-Ks] -->|download, extract Item 1A, chunk| CH[328 chunks]
   CH -->|MiniLM embeddings| PG[(Supabase pgvector)]
-  U[User] --> UI[Streamlit UI] --> API[FastAPI /ask]
+  U[User] --> UI[Streamlit UI] --> API[FastAPI]
   API -->|company filter + top 8| PG
-  API -->|numbered excerpts| LLM[Gemini Flash-Lite]
-  LLM -->|answer with citations or 'Not found'| API
-  API -->|every question| LOG[(qa_log table)] --> MON[Monitoring page + weekly report]
+  API -->|numbered excerpts| LLM[Gemini]
+  LLM -->|cited answer| API
+  API -->|every question| LOG[(question log)] --> MON[Monitoring page + weekly report]
 ```
 
-1. **Pipeline** (`pipeline.yml`): download each company's latest 10-K, extract "Item 1A.
-   Risk Factors" (10/10 sections), split into 400-word chunks with 50-word overlap, embed
-   them with `all-MiniLM-L6-v2` and store them in Supabase pgvector.
-2. **Retrieval**: if a question names a company ("Tesla", "TSLA", "JPMorgan"), only that
-   company's chunks are searched; the top 8 by cosine similarity are kept.
-3. **Answer**: Gemini sees only those excerpts, numbered [1]..[8]. It must cite them, or reply
-   exactly "Not found in the filings." Citations link back to the 10-K on sec.gov.
-4. **Evaluation**: 40 answerable questions (each with a gold quote checked against the filing
-   text) and 10 the Risk Factors sections cannot answer (revenue figures, executives' names).
-5. **App and monitoring**: a Streamlit UI on top of a FastAPI API, hosted free on Streamlit
-   Community Cloud (also packaged as a Docker image); every question is logged and summarized
-   on a Monitoring page.
+1. **Data pipeline.** A GitHub Actions workflow downloads each company's latest 10-K from SEC
+   EDGAR, extracts the "Item 1A. Risk Factors" section, and splits it into 400-word chunks
+   with a 50-word overlap.
+2. **Indexing.** Each chunk is embedded with `all-MiniLM-L6-v2` and stored in Postgres with
+   pgvector, together with its company and the URL of the filing.
+3. **Retrieval.** The question is embedded the same way; the 8 most similar chunks are found
+   by cosine similarity, filtered to the company the question names.
+4. **Answering.** Gemini receives only those excerpts, numbered [1] to [8], with instructions
+   to cite them and to say "Not found in the filings." when they do not hold the answer.
+   Citation numbers are mapped back to chunks and links to the filing.
+5. **Serving.** A FastAPI service exposes `/ask`, `/health` and `/stats`; the Streamlit UI
+   on top of it is hosted on Streamlit Community Cloud. The same app also ships as a
+   Docker image.
 
-## Results
+## Evaluation
 
-| run | chunk words / overlap | top_k | hit rate@k | hit rate@5 | MRR | refusals |
-|---|---|---|---|---|---|---|
-| A | 200 / 50 | 5 | 0.750 | 0.750 | 0.520 | 10/10 |
-| B | 400 / 50 | 5 | 0.825 | 0.825 | 0.602 | 10/10 |
-| **C (in use)** | 400 / 50 | 8 | **0.900** | 0.825 | **0.612** | 10/10 |
+A 50-question test set drives every decision: 40 questions the filings answer, each paired
+with a gold quote verified word-for-word against the filing text, and 10 questions they do
+not answer. Gemini also reads each company's full section to confirm every label.
 
-Hit rate: share of the 40 answerable questions where a retrieved chunk contains the gold
-quote. MRR: mean of 1/rank of that chunk. Refusals: unanswerable questions answered
-"Not found in the filings." Every run is logged to MLflow (download the `mlflow` artifact
-from an Actions → Experiments run, then `mlflow ui --backend-store-uri sqlite:///mlflow.db`).
-The design decisions behind these numbers are in [JOURNAL.md](JOURNAL.md).
+| configuration | chunk words / overlap | top_k | hit rate | MRR | correct "not found" |
+|---|---|---|---|---|---|
+| A | 200 / 50 | 5 | 0.750 | 0.520 | 10/10 |
+| B | 400 / 50 | 5 | 0.825 | 0.602 | 10/10 |
+| **C (live)** | 400 / 50 | 8 | **0.900** | **0.612** | **10/10** |
+
+- **Hit rate**: share of answerable questions where a retrieved chunk contains the gold quote.
+- **MRR**: mean reciprocal rank of that chunk (how high it ranks).
+- **Correct "not found"**: unanswerable questions answered "Not found in the filings."
+
+Every run is tracked in MLflow with its parameters and metrics, and the best configuration
+(C) is the one in production.
 
 ## Quality gates and automation
 
-| Workflow | When | What it guards |
+| Workflow | Runs | What it ensures |
 |---|---|---|
-| `ci.yml` | every PR, push to main | ruff, 140+ unit tests (coverage floor 80%), gitleaks secret scan, **eval gate**: fails if hit rate < 0.875 or MRR < 0.59 (no LLM) |
-| `pipeline.yml` | data code changes | rebuilds the index; PRs write to a separate `ci` index |
-| `testset-verify.yml` | test set changes | every gold quote is still in its chunk |
-| `testset-audit.yml` | test set changes | Gemini re-reads each full section to confirm answerable / unanswerable labels |
-| `eval.yml` (Experiments) | eval changes, manual | runs `eval/experiments.yaml`, logs to MLflow |
-| `docker.yml` (App) | app changes | asks one real question end to end two ways: in the Docker image, and installed exactly as Streamlit Cloud installs it |
-| `monitor.yml` | Mondays | re-checks the test set against the latest filings + the gate; usage report |
-| `qa-demo.yml` | manual | answers `eval/demo_questions.txt` or your own question |
+| CI | every pull request | lint, 140+ unit tests with a coverage floor, secret scanning, and an **evaluation gate** that fails the change if hit rate drops below 0.875 or MRR below 0.59 |
+| Data pipeline | data code changes | rebuilds and re-indexes the filings; pull requests use a separate index |
+| Test set verify and audit | test set changes | every gold quote still matches the filing; every label is confirmed |
+| Experiments | on demand | runs the experiment grid and logs it to MLflow |
+| App | app changes | asks a real question end to end, both in the Docker image and installed exactly as the hosted app is |
+| Weekly monitor | Mondays | re-checks the test set against the latest filings and the quality gate; usage report |
+| Live app check | Mondays and on demand | opens the hosted app in a browser, asks a question and confirms a cited answer |
 
-## The app
+## Monitoring
 
-- **Ask page**: question in, cited answer out, with the retrieved excerpts and their scores.
-- **Monitoring page**: questions per day, refusal rate, latency p50/p95, and the share of
-  low-confidence retrievals (best chunk scored below 0.40). A rising low-confidence share means
-  people ask about things the filings do not cover, or retrieval got worse.
-- **API**: `GET /health`, `POST /ask`, `GET /stats?days=14`, interactive docs at `/docs`.
-  In the Docker image it runs as its own process on port 8000. On Streamlit Cloud (one
-  process) the UI calls the same FastAPI app in-process, so validation, limits and logging
-  are identical.
-- **Guardrails**: questions up to 500 characters, 300 questions per day in total (protects
-  the free Gemini quota), errors never leak internals, and logging can never break answering.
+Every question is logged with its outcome, latency, number of citations and top retrieval
+score. The Monitoring page and a weekly report summarize:
 
-## Secrets
+- questions per day and the share answered from the filings;
+- response time (median and 95th percentile);
+- **low-confidence retrievals**: questions whose best match scores below 0.40. Its trend
+  shows when people start asking about topics the filings do not cover, the signal to add
+  data or tune retrieval.
 
-No secret is ever committed. `.env` is git-ignored and CI scans every push with gitleaks.
-CI secrets live in **repo Settings → Secrets and variables → Actions**; the hosted app gets
-its two secrets from Streamlit Cloud's encrypted secrets store (see Deploy).
+The app also has guardrails for a public deployment: question length limits, a daily
+question budget, and error messages that never expose internals.
 
-| Secret | Used for |
-|---|---|
-| `GEMINI_API_KEY` | LLM calls (Google AI Studio key) |
-| `SEC_USER_AGENT` | SEC requires `Name email` on every request |
-| `SUPABASE_DB_URL` | Postgres: vectors and the question log |
-| `HF_TOKEN` | optional: higher Hugging Face rate limits when CI downloads the embedding model (a read token is enough) |
+## Tools and what each one brings
 
-## Deploy (Streamlit Community Cloud, free)
-
-One-time setup; afterwards every push to `main` redeploys automatically.
-
-1. Go to [share.streamlit.io](https://share.streamlit.io), sign in with GitHub, click
-   **Create app** → **Deploy a public app from GitHub**.
-2. Repository `grizz6/AB-Test`, branch `main`, main file path `app/Ask.py`.
-3. **Advanced settings**: Python version **3.11**, and paste the secrets in TOML form:
-   ```toml
-   GEMINI_API_KEY = "..."
-   SUPABASE_DB_URL = "..."
-   ```
-4. Deploy. Dependencies come from `app/requirements.txt`; the first build takes a few minutes.
-
-Secrets can be added or changed later: on share.streamlit.io, open the app's **⋮** menu →
-**Settings** → **Secrets**. They are stored encrypted by Streamlit, never in the repository,
-and visitors cannot read them; the app only reports whether each one is set. If one is
-missing, the Ask page says which.
-
-Why not Hugging Face Spaces: since July 2026, Docker and Gradio Spaces on the free CPU tier
-need a paid PRO plan (the deploy got HTTP 402), and only static Spaces stay free.
-
-## Run locally
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env            # fill in values; never commit .env
-ruff check . && pytest -q
-
-# Data pipeline (needs SEC_USER_AGENT, SUPABASE_DB_URL)
-python -m src.download && python -m src.parse && python -m src.chunk
-pip install -r requirements-index.txt    # CPU PyTorch, sentence-transformers, psycopg
-python -m src.index
-python -m src.answer "What does Tesla say about supply chain risk?"   # needs GEMINI_API_KEY
-
-# Evaluation
-pip install -r requirements-eval.txt
-python -m src.evaluate --all              # experiments -> mlflow.db
-python -m src.evaluate --gate             # config.yaml vs eval/thresholds.yaml
-
-# App: API on :8000 (docs at /docs), UI on :7860
-docker build -t filings-qa .
-docker run --env-file .env -p 7860:7860 -p 8000:8000 filings-qa
-# or without Docker, one process like Streamlit Cloud: API_URL unset -> API runs in-process
-pip install -r app/requirements.txt && streamlit run app/Ask.py
-```
+| Tool | Role | What it achieves |
+|---|---|---|
+| SEC EDGAR | data source | authoritative, public filings with stable URLs for citations |
+| BeautifulSoup + lxml | parsing | clean Risk Factors text out of large 10-K HTML documents |
+| sentence-transformers (`all-MiniLM-L6-v2`) | embeddings | fast, compact semantic search that runs on CPU |
+| Supabase Postgres + pgvector | vector store and question log | similarity search and app data in one managed database |
+| Google Gemini (`gemini-3.1-flash-lite`) | answer generation | quick, grounded answers from the retrieved excerpts |
+| FastAPI | API | typed, validated endpoints with interactive docs |
+| Streamlit + Altair | UI and monitoring dashboard | an interactive app and charts in pure Python |
+| MLflow | experiment tracking | comparable, reproducible experiment runs |
+| pytest + ruff | testing and linting | 140+ fast unit tests and consistent code style |
+| GitHub Actions | CI/CD and scheduling | pipelines, quality gates and monitoring with no servers to run |
+| gitleaks | secret scanning | keeps credentials out of the repository history |
+| Docker | packaging | one image that runs the API and UI on any container host |
+| Streamlit Community Cloud | hosting | the public app, redeployed on every merge to `main` |
+| Playwright | live checks | verifies the hosted app the way a visitor uses it |
 
 ## Project layout
 
 ```
-src/        download, parse, chunk, index, retrieve, answer, llm, testset, evaluate,
-            api (FastAPI), monitor (question log + summaries)
-app/        Streamlit UI: Ask.py, pages/1_Monitoring.py
-eval/       test_set.jsonl, experiments.yaml, thresholds.yaml, demo_questions.txt
-tests/      unit tests incl. API and UI pages (no network: SEC, Gemini, Supabase and
-            embeddings are faked)
+src/        download, parse, chunk, index, retrieve, answer, llm, testset,
+            evaluate, api (FastAPI), monitor (question log and summaries)
+app/        Streamlit UI: Ask page and Monitoring page
+eval/       test set, experiment grid, quality thresholds, demo questions
+checks/     live check of the hosted app
+tests/      unit tests, including the API and both UI pages
+.github/    workflows for CI, data, evaluation, the app and monitoring
 ```
-
-## Limitations
-
-- Only the Risk Factors section, only 10 companies, only the latest 10-K each.
-- `all-MiniLM-L6-v2` reads ~190 words of each 400-word chunk; the rest still reaches the LLM.
-- Free tiers: Gemini allows ~1,000 requests/day, and a Streamlit Cloud app sleeps after
-  12 hours without visitors (the first visit then takes a minute to wake it).
-- Not investment advice.
-
-## Roadmap
-
-| Day | What | Status |
-|---|---|---|
-| 1 | Setup, CI (ruff, pytest, gitleaks), LLM smoke test | done |
-| 2 | Download 10 filings from SEC EDGAR | done |
-| 3 | Parse "Item 1A. Risk Factors" + chunk: 10/10 sections, 328 chunks | done |
-| 4 | Embed + store in Supabase pgvector | done |
-| 5 | Retrieve + answer with citations: demo 8/8 cited, 2/2 refused (v1.0) | done |
-| 6 | 50-question test set: quotes verified, full-section audit 50/50 | done |
-| 7 | Experiments in MLflow: 400-word chunks, top_k 8 → hit rate 0.900, MRR 0.612 | done |
-| 8 | CI eval gate: fails a PR if hit rate < 0.875 or MRR < 0.59 | done |
-| 9 | FastAPI + Streamlit + Docker; hosted on Streamlit Community Cloud | done |
-| 10 | Question log, Monitoring page, weekly monitor workflow, README | done |
