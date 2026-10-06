@@ -160,3 +160,43 @@ are logged to MLflow (`filings-qa-retrieval`); the database is a workflow artifa
   change in the same PR that improves retrieval.
 - Proof: a throwaway PR set `top_k: 1`. The gate failed it with hit rate 0.475 and MRR 0.475
   (thresholds 0.875 / 0.59), and the PR was closed without merging.
+
+## Day 9: App, Docker, deployment
+
+- `src/api.py` (FastAPI): `POST /ask` returns the answer, citations (with ticker and SEC
+  URL), the retrieved excerpts trimmed to 300 characters, and latency. `GET /health` says
+  whether the secrets are configured, never their values. Errors are mapped to clear
+  messages: Gemini quota used up -> 503 "try again tomorrow"; anything unexpected -> 500 with
+  no internals (a test checks a password in an exception never reaches the response).
+- Guardrails for a public demo on free tiers: questions up to 500 characters and 300
+  questions per day in total, counted from the question log (HTTP 429 after that).
+- `app/` (Streamlit): Ask page with example questions, the cited answer, links to the 10-K
+  and the retrieved excerpts with their similarity scores.
+- One Docker image runs both: the API on :8000 inside the container and the UI on :7860,
+  the port Hugging Face Spaces serves. The embedding model is baked into the image, so the
+  first question does not download it. Runs as user 1000, as Spaces requires.
+- `docker.yml` builds the image on PRs, runs it with the real secrets and asks one question
+  end to end (logged as source "ci" so it stays out of the dashboard).
+- `deploy.yml` + `scripts/deploy_space.py`: on push to main, create the Space if needed, copy
+  GEMINI_API_KEY and SUPABASE_DB_URL into the Space's encrypted secrets, upload exactly the
+  files the image needs, then wait until the live UI passes a health check. Without the
+  HF_TOKEN secret the job skips with a notice instead of failing.
+- Checked locally: the UI and API run against a fake backend, screenshots of both pages
+  looked right. Fixed a hairline bar chart (time axis gave each bar a thin slot; switched to
+  an ordinal day axis with Altair).
+
+## Day 10: Monitoring
+
+- Every question is logged to Supabase (`qa_log`): status (answered / refused / error),
+  latency, number of citations, top retrieval score, model. Logging failures are caught so
+  monitoring can never break answering.
+- `src/monitor.py` summarizes the log: questions per day, refusal rate, latency p50/p95
+  (nearest-rank, errors excluded), and the low-confidence rate: share of questions whose
+  best chunk scored below 0.40. In the Day 5 demo, answerable questions scored 0.57-0.71 and
+  unanswerable ones 0.30-0.34, so 0.40 separates them; a rising share is a drift signal.
+- Monitoring page in the app: KPI row, questions per day, median latency per day, recent
+  questions. `GET /stats` serves the same numbers.
+- `monitor.yml` (Mondays): re-downloads the latest 10-Ks and re-runs the test-set verify and
+  the retrieval gate (no LLM). It fails when a company files a new 10-K that changes the text
+  (time to refresh the test set and re-index) or when retrieval drifts below the thresholds.
+  It also writes the week's usage report to the run summary.
