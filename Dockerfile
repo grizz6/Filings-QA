@@ -27,4 +27,5 @@ COPY --chown=user app ./app
 COPY --chown=user start.sh ./
 
 EXPOSE 7860 8000
-CMD ["sh", "start.sh"]  # sh: uploads to the Space do not keep the executable bit
+# Run through sh: files uploaded to the Space do not keep the executable bit.
+CMD ["sh", "start.sh"]
