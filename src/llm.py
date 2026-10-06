@@ -18,7 +18,7 @@ import requests
 
 from src.config import load_config
 
-TIMEOUT_SECONDS = 60
+TIMEOUT_SECONDS = 120  # a whole Risk Factors section (~20k tokens) can take over 60 s
 RETRY_STATUSES = (429, 500, 503)  # rate limited, or the model is temporarily overloaded
 MAX_RETRIES = 5
 MAX_WAIT_SECONDS = 90
@@ -91,7 +91,8 @@ def chat(
     """Send chat messages and return the reply text.
 
     On 429/500/503 it waits as long as Gemini asks (plus a second), or 2, 4, 8, ... s when
-    no delay is given, up to MAX_RETRIES times. A daily quota error fails immediately.
+    no delay is given, up to MAX_RETRIES times; timeouts and dropped connections are retried
+    the same way. A daily quota error fails immediately.
     """
     llm_cfg = llm_cfg or load_config()["llm"]
     url = f"{llm_cfg['endpoint'].rstrip('/')}/models/{llm_cfg['model']}:generateContent"
@@ -99,13 +100,20 @@ def chat(
     for attempt in range(MAX_RETRIES + 1):
         # Don't follow redirects: requests turns a redirected POST into a GET, which hides
         # the real error behind whatever page the redirect lands on.
-        resp = requests.post(
-            url,
-            headers=_headers(key),
-            json=build_payload(messages, llm_cfg, json_mode),
-            timeout=TIMEOUT_SECONDS,
-            allow_redirects=False,
-        )
+        try:
+            resp = requests.post(
+                url,
+                headers=_headers(key),
+                json=build_payload(messages, llm_cfg, json_mode),
+                timeout=TIMEOUT_SECONDS,
+                allow_redirects=False,
+            )
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            # Long prompts (a whole Risk Factors section) sometimes time out on the free tier.
+            if attempt == MAX_RETRIES:
+                raise LLMError(f"Gemini sent no response after {attempt + 1} tries: {exc}") from exc
+            sleep(2 ** (attempt + 1))
+            continue
         if resp.status_code == 429 and is_daily_quota(resp.text):
             raise LLMError(
                 "Gemini daily free-tier quota is used up for this model; it resets daily. "

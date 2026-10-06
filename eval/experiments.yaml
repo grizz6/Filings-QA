@@ -1,0 +1,16 @@
+# Day 7 experiments: change ONE thing at a time.
+# A vs B: chunk size (all-MiniLM-L6-v2 reads only ~256 word pieces, about 190 words, per chunk).
+# B vs C: how many chunks are retrieved.
+experiments:
+  A_chunk200_k5:
+    size_words: 200
+    overlap_words: 50
+    top_k: 5
+  B_chunk400_k5:
+    size_words: 400
+    overlap_words: 50
+    top_k: 5
+  C_chunk400_k8:
+    size_words: 400
+    overlap_words: 50
+    top_k: 8

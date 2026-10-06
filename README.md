@@ -7,7 +7,8 @@ A retrieval-augmented generation (RAG) system built as an MLOps project: tracked
 an evaluation test set, CI that blocks changes when retrieval quality drops, a containerized
 app, and monitoring. Runs entirely on free cloud services, with no credit card and no local LLM.
 
-> **Status:** v1.0 works (cited answers). Day 6: 50-question test set. See the roadmap below.
+> **Status:** v1.0 works (cited answers). Days 6-8: 50-question test set, MLflow experiments,
+> and a CI gate that fails when retrieval quality drops. See the roadmap below.
 
 ## Cloud stack (all free tiers)
 
@@ -46,12 +47,29 @@ pip install -r requirements-index.txt   # sentence-transformers (CPU PyTorch), p
 python -m src.index          # embed + store in Supabase; needs SUPABASE_DB_URL in .env
 python -m src.index --query "supply chain risk" --ticker TSLA
 python -m src.answer "What does Tesla say about supply chain risk?"   # needs GEMINI_API_KEY too
+pip install -r requirements-eval.txt     # adds MLflow
+python -m src.evaluate --all             # Day 7 experiments -> mlflow.db (needs data/sections/)
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+python -m src.evaluate --gate            # Day 8: config.yaml vs eval/thresholds.yaml, no LLM
 ```
 
 In the cloud, `.github/workflows/pipeline.yml` runs all of these in GitHub Actions. Pull
 requests write to a separate `ci` index in Supabase so they never touch `main`.
 `.github/workflows/qa-demo.yml` answers `eval/demo_questions.txt` (or a question you type in
 under Actions → Q&A demo → Run workflow) and prints the answers with citations.
+
+## Evaluation
+
+| run | chunk words / overlap | top_k | hit rate@k | hit rate@5 | MRR | refusals |
+|---|---|---|---|---|---|---|
+| A | 200 / 50 | 5 | 0.750 | 0.750 | 0.520 | 10/10 |
+| B | 400 / 50 | 5 | 0.825 | 0.825 | 0.602 | 10/10 |
+| **C (in use)** | 400 / 50 | 8 | **0.900** | 0.825 | **0.612** | 10/10 |
+
+Hit rate: share of the 40 answerable questions where a retrieved chunk contains the gold
+quote. MRR: mean of 1/rank of that chunk. Refusals: unanswerable questions answered
+"Not found in the filings." Every run is logged to MLflow: download the `mlflow` artifact from
+an Actions → Experiments run and open it with `mlflow ui --backend-store-uri sqlite:///mlflow.db`.
 
 ## Roadmap
 
@@ -62,8 +80,8 @@ under Actions → Q&A demo → Run workflow) and prints the answers with citatio
 | 3 | Parse "Item 1A. Risk Factors" + chunk + tests (`src/parse.py`, `src/chunk.py`): 10/10 sections, 328 chunks | done |
 | 4 | Embed + store in Supabase pgvector (`src/index.py`): 328 chunks in the `main` index | done |
 | 5 | Retrieve + answer with citations (`src/retrieve.py`, `src/answer.py`): demo 8/8 answered with citations, 2/2 refused (v1.0) | done |
-| 6 | 50-question test set (`eval/test_set.jsonl`, `src/testset.py`) | in review |
-| 7 | Evaluation + MLflow experiments | |
-| 8 | CI eval gate (blocks quality drops) | |
+| 6 | 50-question test set (`eval/test_set.jsonl`, `src/testset.py`): 40 answerable + 10 unanswerable, quotes verified, full-section audit | done |
+| 7 | Evaluation + MLflow experiments (`src/evaluate.py`): best is 400-word chunks, top_k 8: hit rate 0.900, MRR 0.612, refusals 10/10 | done |
+| 8 | CI eval gate (`eval-gate` job, `eval/thresholds.yaml`): fails a PR if hit rate < 0.875 or MRR < 0.59 | done |
 | 9 | FastAPI + Streamlit + Docker, deployed to Spaces | |
 | 10 | Monitoring dashboard + README + demo | |

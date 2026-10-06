@@ -111,3 +111,114 @@ def test_committed_test_set_is_valid():
 
     items = testset.load_jsonl(testset.TEST_SET_PATH)
     assert testset.check_test_set(items, set(load_config()["companies"])) == []
+
+
+SECTION = CHUNK_TEXT + " Our Chief Executive Officer is Elon Musk."
+
+
+def _audit_reply(answerable, evidence=""):
+    return lambda m, c, json_mode: json.dumps({"answerable": answerable, "evidence": evidence})
+
+
+def test_audit_item_verdicts():
+    item = {"id": "q01", "question": "Q?"}
+    real = "Any disruption in the supply of battery cells from our suppliers could limit"
+    assert testset.audit_item(item, SECTION, "Tesla", _audit_reply(True, real), {})["verdict"] == (
+        "answered"
+    )
+    invented = "Tesla has no supply chain risks at all in any market"
+    assert (
+        testset.audit_item(item, SECTION, "Tesla", _audit_reply(True, invented), {})["verdict"]
+        == "unclear"
+    )
+    assert testset.audit_item(item, SECTION, "Tesla", _audit_reply(False), {})["verdict"] == (
+        "not_answered"
+    )
+    bad_json = lambda m, c, json_mode: "nope"  # noqa: E731
+    assert testset.audit_item(item, SECTION, "Tesla", bad_json, {})["verdict"] == "unclear"
+
+
+def test_audit_accepts_evidence_with_a_long_verbatim_span():
+    # Seen in CI (q07): the model copied the start of a sentence and paraphrased the end.
+    item = {"id": "q07", "question": "Q?"}
+    partly_copied = (
+        "Any disruption in the supply of battery cells from our suppliers could limit "
+        "output and hurt our margins badly."
+    )
+    result = testset.audit_item(item, SECTION, "Tesla", _audit_reply(True, partly_copied), {})
+    assert result["verdict"] == "answered"
+    assert testset.grounded_in(SECTION, "Elon Musk is the Chief Executive Officer.") is False
+
+
+def test_audit_item_reports_llm_errors_without_a_verdict():
+    def overloaded(m, c, json_mode):
+        raise testset.LLMError("Gemini returned 503: high demand")
+
+    result = testset.audit_item({"id": "q01", "question": "Q?"}, SECTION, "Tesla", overloaded, {})
+    assert result["verdict"] == "error" and "503" in result["evidence"]
+
+
+def test_audit_problems_ignores_a_few_errors_but_not_many():
+    items = [{"id": f"q{i:02d}", "answerable": True} for i in range(10)]
+    err = [{"id": f"q{i:02d}", "verdict": "error", "evidence": ""} for i in range(10)]
+    ok = [{"id": f"q{i:02d}", "verdict": "answered", "evidence": "x"} for i in range(10)]
+    few = err[: testset.MAX_AUDIT_ERRORS] + ok[testset.MAX_AUDIT_ERRORS :]
+    assert testset.audit_problems(items, few) == []
+    many = err[: testset.MAX_AUDIT_ERRORS + 1] + ok[testset.MAX_AUDIT_ERRORS + 1 :]
+    assert testset.audit_problems(items, many) == [
+        f"{testset.MAX_AUDIT_ERRORS + 1} questions could not be audited (Gemini errors)"
+    ]
+
+
+def test_run_audit_stops_once_too_many_calls_fail(tmp_path):
+    # Seen in CI: the daily free-tier quota ran out, so every call failed.
+    (tmp_path / "TSLA.txt").write_text(SECTION)
+    items = [{"id": f"q{i:02d}", "ticker": "TSLA", "question": "Q?"} for i in range(20)]
+    calls = []
+
+    def no_quota(m, c, json_mode):
+        calls.append(1)
+        raise testset.LLMError("Gemini daily free-tier quota is used up")
+
+    results = testset.run_audit(
+        items, {"TSLA": "Tesla"}, tmp_path, no_quota, {}, sleep=lambda s: None
+    )
+    assert len(calls) == len(results) == testset.MAX_AUDIT_ERRORS + 1
+
+
+def test_audit_problems_flags_both_directions():
+    items = [
+        {"id": "q01", "answerable": True},
+        {"id": "q02", "answerable": False},
+        {"id": "q03", "answerable": False},
+    ]
+    results = [
+        {"id": "q01", "verdict": "not_answered", "evidence": ""},
+        {"id": "q02", "verdict": "answered", "evidence": "Our CEO is Elon Musk."},
+        {"id": "q03", "verdict": "not_answered", "evidence": ""},
+    ]
+    assert testset.audit_problems(items, results) == [
+        "q01: expected answerable, audit says not_answered",
+        "q02: expected unanswerable, but section says: Our CEO is Elon Musk.",
+    ]
+
+
+def test_run_audit_reads_each_company_section(tmp_path):
+    (tmp_path / "TSLA.txt").write_text(SECTION)
+    items = [{"id": "q01", "ticker": "TSLA", "question": "Who is the CEO?", "answerable": False}]
+    ceo = "Our Chief Executive Officer is Elon Musk."
+    results = testset.run_audit(
+        items, {"TSLA": "Tesla"}, tmp_path, _audit_reply(True, ceo), {}, sleep=lambda s: None
+    )
+    assert results == [{"id": "q01", "verdict": "answered", "evidence": ceo}]
+
+
+def test_run_audit_reports_each_result_as_it_goes(tmp_path):
+    (tmp_path / "TSLA.txt").write_text(SECTION)
+    items = [{"id": f"q0{i}", "ticker": "TSLA", "question": "Q?"} for i in (1, 2)]
+    seen = []
+    testset.run_audit(
+        items, {"TSLA": "Tesla"}, tmp_path, _audit_reply(False), {},
+        sleep=lambda s: None, on_result=seen.append,
+    )  # fmt: skip
+    assert [r["id"] for r in seen] == ["q01", "q02"]

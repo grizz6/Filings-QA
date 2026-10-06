@@ -121,3 +121,42 @@ instead of guessing.
 - Each answerable item keeps its quote, so a retrieved chunk counts as correct when it
   contains the quote. This survives chunk-size experiments that change chunk IDs.
 - `testset-verify.yml` rebuilds the chunks and checks every quote against the real text.
+- Audit (`testset-audit.yml`): Gemini reads each company's ENTIRE Risk Factors section and
+  says whether it answers each question, with a supporting sentence checked against the text.
+  First runs crashed on Gemini timeouts and "high demand" 503s; calls are now retried on
+  timeouts, and a call that still fails is reported as "not audited" instead of failing.
+  q07 was flagged only because the model copied half a sentence and paraphrased the rest, so
+  evidence now counts when 10+ consecutive words match the section.
+- Audit result: all 50 questions agree with the full sections (40/40 answered with
+  evidence found in the text, 10/10 unanswerable confirmed not answered).
+
+## Day 7: Experiments
+
+`src/evaluate.py` rebuilds chunks from the sections for each experiment, embeds them, and
+searches in memory (same model and company filter as the app, no Supabase writes). Results
+are logged to MLflow (`filings-qa-retrieval`); the database is a workflow artifact.
+
+| run | chunks | top_k | hit rate@k | hit rate@5 | MRR | refusals | chunks |
+|---|---|---|---|---|---|---|---|
+| A | 200 / 50 | 5 | 0.750 | 0.750 | 0.520 | 1.000 | 759 |
+| B | 400 / 50 | 5 | 0.825 | 0.825 | 0.602 | 1.000 | 328 |
+| C | 400 / 50 | 8 | 0.900 | 0.825 | 0.612 | 1.000 | 328 |
+
+- Hypothesis from Day 4 was that MiniLM truncating at ~190 words hurts 400-word chunks, so
+  200-word chunks should retrieve better. Wrong: A is worst. Smaller chunks split the risk
+  factor's heading from its explanation, and there are 2.3x as many chunks competing.
+- More results (k=8) recover 3 more questions; MRR barely moves, so the extra hits are at
+  ranks 6-8. Cost: ~3,200 more words of context per Gemini call, well within Flash-Lite limits.
+- Refusals were 10/10 in every run, so a bigger k did not make the model answer questions
+  the filings cannot answer.
+- Decision: `top_k: 8` in config.yaml (chunks unchanged, so the Supabase index is still valid).
+
+## Day 8: CI eval gate
+
+- `eval-gate` job in `ci.yml`: runs `python -m src.evaluate --gate` on every PR with the
+  settings in config.yaml and fails if hit rate < 0.875 or MRR < 0.59 (`eval/thresholds.yaml`).
+  Retrieval only, so no LLM quota is spent in CI and the result is deterministic.
+- Thresholds allow one question to slip (0.900 -> 0.875). Raising them is a deliberate
+  change in the same PR that improves retrieval.
+- Proof: a throwaway PR set `top_k: 1`. The gate failed it with hit rate 0.475 and MRR 0.475
+  (thresholds 0.875 / 0.59), and the PR was closed without merging.

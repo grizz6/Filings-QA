@@ -91,6 +91,28 @@ def test_overloaded_then_success(monkeypatch):
     assert llm.chat([{"role": "user", "content": "hi"}], CFG, sleep=lambda s: None) == "hi"
 
 
+def test_timeout_is_retried_then_raises(monkeypatch):
+    # Seen in CI: a full Risk Factors section took over 60 s and the read timed out.
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    outcomes = [llm.requests.exceptions.ReadTimeout("slow"), FakeResponse(200, _reply("hi"))]
+
+    def fake_post(*a, **k):
+        out = outcomes.pop(0)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    monkeypatch.setattr(llm.requests, "post", fake_post)
+    assert llm.chat([{"role": "user", "content": "hi"}], CFG, sleep=lambda s: None) == "hi"
+
+    def always_slow(*a, **k):
+        raise llm.requests.exceptions.ConnectionError("reset")
+
+    monkeypatch.setattr(llm.requests, "post", always_slow)
+    with pytest.raises(llm.LLMError, match="no response"):
+        llm.chat([{"role": "user", "content": "hi"}], CFG, sleep=lambda s: None)
+
+
 def test_client_errors_are_not_retried(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     calls = []

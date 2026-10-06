@@ -1,0 +1,6 @@
+# Day 8 eval gate: CI fails if retrieval quality for the settings in config.yaml drops
+# below these numbers. Set slightly below the best measured score (see JOURNAL.md, Day 7):
+# chunks 400/50, top_k 8 scored hit_rate_at_k 0.900 (36/40) and mrr 0.612.
+# Retrieval is deterministic, so the margin allows one question to slip, no more.
+hit_rate_at_k: 0.875
+mrr: 0.59

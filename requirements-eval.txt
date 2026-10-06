@@ -1,0 +1,3 @@
+# Evaluation (Day 7): embedding stack + MLflow experiment tracking.
+-r requirements-index.txt
+mlflow>=2.14

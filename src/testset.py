@@ -12,6 +12,14 @@ Step 2, by a person: review the candidates, edit or drop weak ones, add unanswer
 Step 3: validate the file.
     python -m src.testset check        # schema + 40 answerable / 10 unanswerable split
     python -m src.testset verify       # every quote appears in its expected chunk
+    python -m src.testset audit        # full-section check of every question (LLM)
+
+The audit gives Gemini the company's ENTIRE Risk Factors section and asks whether it
+answers the question, with an exact supporting sentence. The sentence is checked against the
+section text, so the audit cannot be satisfied by an invented quote. It flags unanswerable
+questions that the section does answer, and answerable ones it does not support. A call that
+still fails after the retries (e.g. Gemini overloaded) is listed as a warning, not a mismatch;
+more than MAX_AUDIT_ERRORS such failures stop the audit and fail it.
 
 Each answerable item stores its quote, so a retrieved chunk counts as correct when it
 contains the quote. That keeps the test set valid when chunk sizes (and IDs) change.
@@ -26,13 +34,21 @@ import time
 from pathlib import Path
 
 from src.config import ROOT, load_config
+from src.llm import LLMError
 
 CHUNKS_PATH = ROOT / "data" / "chunks.jsonl"
+SECTIONS_DIR = ROOT / "data" / "sections"
 CANDIDATES_PATH = ROOT / "data" / "eval" / "candidates.jsonl"
 TEST_SET_PATH = ROOT / "eval" / "test_set.jsonl"
 
 PER_COMPANY = 4
 SECONDS_BETWEEN_CALLS = 5  # free tier allows ~15 requests/minute for gemini-3.1-flash-lite
+# Audit calls send a whole Risk Factors section (up to ~20k tokens), so they are spaced
+# further apart to stay under the free tier's tokens-per-minute limit.
+AUDIT_SECONDS_BETWEEN_CALLS = 7
+# A few failed calls (Gemini overloaded) are tolerated; more means the audit proved nothing
+# (e.g. the daily quota ran out), so it stops early and fails.
+MAX_AUDIT_ERRORS = 5
 EXPECTED_ANSWERABLE = 40
 EXPECTED_UNANSWERABLE = 10
 
@@ -66,6 +82,22 @@ def normalize(text: str) -> str:
 def contains_quote(chunk_text: str, quote: str) -> bool:
     q = normalize(quote).strip(" .\"'")
     return len(q.split()) >= 5 and q in normalize(chunk_text)
+
+
+GROUNDING_SPAN_WORDS = 10
+
+
+def grounded_in(text: str, evidence: str, span: int = GROUNDING_SPAN_WORDS) -> bool:
+    """True if the evidence, or a run of `span` consecutive words from it, is in the text.
+
+    Models often copy the start of a sentence and paraphrase the rest; 10 verbatim words
+    still prove the evidence came from the text.
+    """
+    if contains_quote(text, evidence):
+        return True
+    words = normalize(evidence).split()
+    haystack = normalize(text)
+    return any(" ".join(words[i : i + span]) in haystack for i in range(len(words) - span + 1))
 
 
 def pick_chunks(chunks: list[dict], per_company: int = PER_COMPANY) -> list[dict]:
@@ -119,6 +151,78 @@ def make_candidates(chunks, companies, chat_fn, llm_cfg, sleep=time.sleep) -> li
         cand = draft_candidate(chunk, companies[chunk["ticker"]], chat_fn, llm_cfg)
         out.append({"ticker": chunk["ticker"], "chunk_id": chunk["id"], **cand})
     return out
+
+
+AUDIT_PROMPT = """Below is the complete "Risk Factors" section of {company}'s annual report.
+
+Does this section answer the question? Answer only from the section.
+
+Question: {question}
+
+Return JSON with exactly these keys:
+- "answerable": true if the section contains the answer, otherwise false.
+- "evidence": if answerable, one sentence copied EXACTLY, word for word, from the section that
+  answers the question; otherwise "".
+
+Section:
+{section}"""
+
+
+def audit_item(item: dict, section: str, company: str, chat_fn, llm_cfg: dict) -> dict:
+    """Ask whether the full section answers the question; verify the evidence sentence."""
+    prompt = AUDIT_PROMPT.format(company=company, question=item["question"], section=section)
+    try:
+        raw = chat_fn([{"role": "user", "content": prompt}], llm_cfg, json_mode=True)
+    except LLMError as exc:  # e.g. a 503 that outlasted the retries: no verdict, not a mismatch
+        return {"id": item["id"], "verdict": "error", "evidence": str(exc)[:200]}
+    try:
+        data = json.loads(raw)
+        says_answerable = bool(data.get("answerable"))
+        evidence = str(data.get("evidence", "")).strip()
+    except (ValueError, AttributeError):
+        return {"id": item["id"], "verdict": "unclear", "evidence": ""}
+    if says_answerable and grounded_in(section, evidence):
+        verdict = "answered"
+    elif says_answerable:
+        verdict = "unclear"  # claims an answer but the sentence is not in the section
+    else:
+        verdict = "not_answered"
+    return {"id": item["id"], "verdict": verdict, "evidence": evidence}
+
+
+def audit_problems(items: list[dict], results: list[dict]) -> list[str]:
+    """Mismatches between what the test set says and what the full-section audit found."""
+    by_id = {r["id"]: r for r in results}
+    errors = sum(r["verdict"] == "error" for r in results)
+    if errors > MAX_AUDIT_ERRORS:
+        return [f"{errors} questions could not be audited (Gemini errors)"]
+    problems = []
+    for it in items:
+        r = by_id[it["id"]]
+        if r["verdict"] == "error":
+            continue  # reported separately by main(); Gemini failed, not the test set
+        if it["answerable"] and r["verdict"] != "answered":
+            problems.append(f"{it['id']}: expected answerable, audit says {r['verdict']}")
+        if not it["answerable"] and r["verdict"] == "answered":
+            problems.append(f"{it['id']}: expected unanswerable, but section says: {r['evidence']}")
+    return problems
+
+
+def run_audit(
+    items, companies, sections_dir, chat_fn, llm_cfg, sleep=time.sleep, on_result=None
+) -> list[dict]:
+    """Audit every item; on_result sees each verdict as soon as it arrives (for live logs)."""
+    results = []
+    for i, it in enumerate(items):
+        if i:
+            sleep(AUDIT_SECONDS_BETWEEN_CALLS)
+        section = (sections_dir / f"{it['ticker']}.txt").read_text()
+        results.append(audit_item(it, section, companies[it["ticker"]], chat_fn, llm_cfg))
+        if on_result:
+            on_result(results[-1])
+        if sum(r["verdict"] == "error" for r in results) > MAX_AUDIT_ERRORS:
+            break
+    return results
 
 
 def load_jsonl(path: Path) -> list[dict]:
@@ -190,6 +294,23 @@ def main() -> None:
             print("\n".join(f"ERROR: {p}" for p in problems), file=sys.stderr)
             sys.exit(1)
         print("every answerable quote was found in its expected chunk")
+    elif cmd == "audit":
+        from src.llm import chat
+
+        items = load_jsonl(TEST_SET_PATH)
+        results = run_audit(
+            items, cfg["companies"], SECTIONS_DIR, chat, cfg["llm"],
+            on_result=lambda r: print(json.dumps(r, ensure_ascii=False), flush=True),
+        )  # fmt: skip
+        errors = [r["id"] for r in results if r["verdict"] == "error"]
+        if errors:
+            print(f"WARNING: not audited (Gemini errors): {', '.join(errors)}", file=sys.stderr)
+        problems = audit_problems(items, results)
+        if problems:
+            print("\n".join(f"ERROR: {p}" for p in problems), file=sys.stderr)
+            sys.exit(1)
+        audited = len(items) - len(errors)
+        print(f"audit: all {audited} audited questions agree with the full Risk Factors sections")
     elif cmd == "check":
         problems = check_test_set(load_jsonl(TEST_SET_PATH), set(cfg["companies"]))
         if problems:
@@ -197,7 +318,7 @@ def main() -> None:
             sys.exit(1)
         print(f"{TEST_SET_PATH.relative_to(ROOT)} is valid")
     else:
-        sys.exit("usage: python -m src.testset candidates|check|verify")
+        sys.exit("usage: python -m src.testset candidates|check|verify|audit")
 
 
 if __name__ == "__main__":
