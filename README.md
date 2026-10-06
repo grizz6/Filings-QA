@@ -55,7 +55,7 @@ The design decisions behind these numbers are in [JOURNAL.md](JOURNAL.md).
 
 | Workflow | When | What it guards |
 |---|---|---|
-| `ci.yml` | every PR, push to main | ruff, 120+ unit tests, gitleaks secret scan, **eval gate**: fails if hit rate < 0.875 or MRR < 0.59 (no LLM) |
+| `ci.yml` | every PR, push to main | ruff, 140+ unit tests (coverage floor 80%), gitleaks secret scan, **eval gate**: fails if hit rate < 0.875 or MRR < 0.59 (no LLM) |
 | `pipeline.yml` | data code changes | rebuilds the index; PRs write to a separate `ci` index |
 | `testset-verify.yml` | test set changes | every gold quote is still in its chunk |
 | `testset-audit.yml` | test set changes | Gemini re-reads each full section to confirm answerable / unanswerable labels |
@@ -124,7 +124,8 @@ src/        download, parse, chunk, index, retrieve, answer, llm, testset, evalu
 app/        Streamlit UI: Ask.py, pages/1_Monitoring.py
 eval/       test_set.jsonl, experiments.yaml, thresholds.yaml, demo_questions.txt
 scripts/    deploy_space.py (Hugging Face Spaces deploy)
-tests/      unit tests (no network: SEC, Gemini, Supabase and embeddings are faked)
+tests/      unit tests incl. API and UI pages (no network: SEC, Gemini, Supabase,
+            Hugging Face and embeddings are faked)
 ```
 
 ## Limitations

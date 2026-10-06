@@ -200,3 +200,18 @@ are logged to MLflow (`filings-qa-retrieval`); the database is a workflow artifa
   the retrieval gate (no LLM). It fails when a company files a new 10-K that changes the text
   (time to refresh the test set and re-index) or when retrieval drifts below the thresholds.
   It also writes the week's usage report to the run summary.
+
+## Pre-deploy test pass
+
+- Coverage before: 68% overall, and 0-39% on the code that only runs in production (UI pages,
+  deploy script). Added tests where a bug would only show on the live Space:
+  - API: the real `answer()` -> `retrieve()` -> `chat()` chain wired through `/ask` (only the
+    vector search and Gemini's HTTP call faked); no-database fallback; an unreadable log does
+    not block questions; non-quota Gemini outage -> 503 "try again".
+  - `PgLog` SQL against a fake driver: the INSERT has one placeholder per value in the right
+    order. A mismatch would be silent in production because the API swallows logging errors.
+  - Deploy script with a fake Hugging Face client: Space name, both secrets, staged files
+    (no tests or .env), commit message; the wait loop's success, build-error and timeout paths.
+  - UI pages run headless with Streamlit's AppTest against canned API responses: answered,
+    refused, API error, example buttons, Monitoring with data / empty / API down.
+- Coverage after: 81% overall; API, UI, monitoring and deploy at 89-100%. CI now fails below 80%.

@@ -71,3 +71,79 @@ def test_report_markdown_mentions_the_key_numbers():
     assert "| Questions | 2 |" in text
     assert "| Refusal rate | 50.0% |" in text
     assert "| Low-confidence retrievals | 50.0% |" in text
+
+
+class FakeConn:
+    """Stands in for a psycopg connection: records every statement and its parameters."""
+
+    def __init__(self, calls, result):
+        self.calls, self.result = calls, result
+
+    def execute(self, sql, params=None):
+        self.calls.append((" ".join(sql.split()), params))
+        return self
+
+    def fetchone(self):
+        return self.result
+
+    def fetchall(self):
+        return self.result
+
+    def commit(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def fake_psycopg(monkeypatch, result=None):
+    import sys
+    import types
+
+    calls = []
+    psycopg = types.SimpleNamespace(connect=lambda url, row_factory=None: FakeConn(calls, result))
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg)
+    monkeypatch.setitem(sys.modules, "psycopg.rows", types.SimpleNamespace(dict_row=object()))
+    return calls
+
+
+def test_pglog_insert_matches_columns_and_creates_schema_once(monkeypatch):
+    # A mismatch here would be silent in production: the API swallows logging errors.
+    calls = fake_psycopg(monkeypatch)
+    log = monitor.PgLog("postgresql://x", source="app")
+    record = {c: f"v_{c}" for c in monitor.COLUMNS}
+    log.add(record)
+    log.add(record)
+    sqls = [sql for sql, _ in calls]
+    assert sum(s.startswith("CREATE TABLE") for s in sqls) == 1
+    inserts = [(sql, p) for sql, p in calls if sql.startswith("INSERT")]
+    assert len(inserts) == 2
+    sql, params = inserts[0]
+    assert sql.count("%s") == len(params) == len(monitor.COLUMNS) + 1
+    assert params == ("app", *(f"v_{c}" for c in monitor.COLUMNS))
+    assert sql.startswith("INSERT INTO qa_log (source, " + ", ".join(monitor.COLUMNS) + ")")
+
+
+def test_pglog_reads_only_its_own_source(monkeypatch):
+    since = NOW - timedelta(days=1)
+    calls = fake_psycopg(monkeypatch, result={"n": 7})
+    assert monitor.PgLog("postgresql://x", source="app").count_since(since) == 7
+    assert calls[-1][1] == ("app", since)
+    calls = fake_psycopg(monkeypatch, result=[row(1)])
+    assert monitor.PgLog("postgresql://x", source="ci").rows_since(since) == [row(1)]
+    assert "WHERE source = %s AND ts >= %s" in calls[-1][0] and calls[-1][1] == ("ci", since)
+
+
+def test_main_writes_the_report_to_the_job_summary(monkeypatch, tmp_path, capsys):
+    store = monitor.MemoryLog()
+    store.add({**row(0), "ts": datetime.now(UTC)})  # real clock: main() reads the last 7 days
+    monkeypatch.setattr(monitor, "PgLog", lambda url: store)
+    monkeypatch.setenv("SUPABASE_DB_URL", "postgresql://x")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
+    monkeypatch.setattr("sys.argv", ["monitor", "--days", "7"])
+    monitor.main()
+    assert "| Questions | 1 |" in capsys.readouterr().out
+    assert "| Questions | 1 |" in (tmp_path / "summary.md").read_text()
