@@ -6,6 +6,7 @@ name: Daily traffic
 #   checks/questions.txt, spread over hourly slots from 9:00 to 16:59 New York time.
 # - The cron fires hourly over a UTC range that covers 9am-5pm New York in both summer and
 #   winter time; checks/daily_traffic.py keeps only the runs inside the window.
+# - GitHub may start scheduled runs late; the slot is taken from the time the run starts.
 # - Every question must get a cited answer or a clear "Not found in the filings.";
 #   anything else fails the run, and GitHub emails the repository owner.
 on:
