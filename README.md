@@ -91,19 +91,17 @@ All experiment runs are tracked in MLflow with their parameters and metrics.
 
 ### Continuous integration and delivery
 
-| Workflow | Trigger | Purpose |
-|---|---|---|
-| CI | Pull requests, `main` | Linting, ~150 unit tests with an 80% coverage floor, secret scanning, and an **evaluation gate** (hit rate ≥ 0.875, MRR ≥ 0.59) |
-| Data pipeline | Data code changes | Download, parse, chunk, embed and index the filings |
-| Test-set verification | Benchmark changes | Confirms every gold quote still matches the filing text |
-| Test-set audit | Benchmark changes | Model-based validation of every label against the full section |
-| Experiments | On demand | Runs the experiment grid and logs results to MLflow |
-| App | App changes | End-to-end answer test in the Docker image and in the hosted-app configuration |
-| Weekly monitor | Scheduled | Re-validates the benchmark against the latest filings and reports usage |
-| Live app check | Scheduled, on demand | Browser-based check that the deployed app returns a cited answer |
-| Daily traffic | Hourly, 9am–5pm New York | Asks the live app a random 1–67 questions a day from an 80-question pool, like real visitors; any error fails the run and alerts the owner |
+All automation runs on GitHub Actions:
 
-The hosted application redeploys automatically from `main`.
+- **Quality checks on every change:** linting, unit tests, secret scanning and an
+  evaluation gate that blocks any change that lowers retrieval quality.
+- **Automated data pipeline:** filings are fetched, processed and indexed without manual
+  steps.
+- **End-to-end testing:** the containerized app and the hosted app are tested with real
+  questions before release.
+- **Continuous delivery:** the hosted application redeploys automatically from `main`.
+- **Scheduled checks:** the live app is exercised daily and the benchmark is re-validated
+  weekly, with alerts on any failure.
 
 ### Monitoring
 
