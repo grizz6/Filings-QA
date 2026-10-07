@@ -1,9 +1,11 @@
 """Check the live app the way a visitor uses it: open it, ask a question, read the answer.
 
 Run by .github/workflows/live-check.yml (on demand and weekly).
-  APP_URL   the app to check (default https://filings.streamlit.app)
-  QUESTION  what to ask (default: Tesla supply chain risk)
-Exits non-zero, with what the page shows, if no cited answer appears.
+  APP_URL    the app to check (default https://filings.streamlit.app)
+  QUESTION   what to ask (default: Tesla supply chain risk); must get a cited answer
+  QUESTIONS  optional batch, separated by "|": each must get a cited answer or a clear
+             "Not found in the filings." (both are correct behaviour); errors fail the run
+Prints what the page shows for each question and a summary table.
 """
 
 from __future__ import annotations
@@ -43,34 +45,49 @@ def app_frame(page, deadline: float):
     )
 
 
+def ask(page, question: str) -> tuple[str, str]:
+    """Ask one question in a fresh session; return (outcome, text the app shows)."""
+    page.goto(APP_URL, wait_until="domcontentloaded", timeout=120_000)
+    frame = app_frame(page, time.time() + WAKE_SECONDS)
+    frame.get_by_label("Your question").fill(question)
+    frame.get_by_role("button", name="Ask", exact=True).click()
+    deadline = time.time() + ANSWER_SECONDS
+    shown = ""
+    while time.time() < deadline:
+        shown = frame.locator("body").inner_text().split("Your question", 1)[-1]
+        if "Answered in" in shown or DONE.search(shown):
+            break
+        page.wait_for_timeout(2000)
+    page.wait_for_timeout(1000)
+    if "Answered in" in shown and "open the 10-K" in shown:
+        return "answered", shown.strip()
+    if "Not found in the filings" in shown:
+        return "not found", shown.strip()
+    return "problem", shown.strip()
+
+
 def main() -> None:
+    batch = [q.strip() for q in os.environ.get("QUESTIONS", "").split("|") if q.strip()]
+    questions = batch or [QUESTION]
+    results = []
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=os.environ.get("CHROMIUM_PATH") or None)
         page = browser.new_page(viewport={"width": 1280, "height": 1100})
-        page.goto(APP_URL, wait_until="domcontentloaded", timeout=120_000)
-        frame = app_frame(page, time.time() + WAKE_SECONDS)
-        print(f"Loaded {APP_URL}", flush=True)
-
-        frame.get_by_label("Your question").fill(QUESTION)
-        frame.get_by_role("button", name="Ask", exact=True).click()
-        print(f"Asked: {QUESTION}", flush=True)
-
-        deadline = time.time() + ANSWER_SECONDS
-        text = ""
-        while time.time() < deadline:
-            text = frame.locator("body").inner_text()
-            if "Answered in" in text or DONE.search(text.split("Your question", 1)[-1]):
-                break
-            page.wait_for_timeout(2000)
-        page.wait_for_timeout(1000)
+        for question in questions:
+            outcome, shown = ask(page, question)
+            results.append((question, outcome))
+            print(f"---- {question} -> {outcome} ----\n{shown[:2500]}\n", flush=True)
         page.screenshot(path="live-check.png", full_page=True)
         browser.close()
 
-    shown = text.split("Your question", 1)[-1].strip()
-    print("---- what the page shows ----\n" + shown[:3000] + "\n-----------------------------")
-    if "Answered in" not in text or "open the 10-K" not in text:
-        sys.exit("No cited answer on the live app (see the page text above).")
-    print("Live app answered with citations.")
+    print("| outcome | question |\n|---|---|")
+    for question, outcome in results:
+        print(f"| {outcome} | {question} |")
+    allowed = {"answered", "not found"} if batch else {"answered"}
+    failed = [q for q, outcome in results if outcome not in allowed]
+    if failed:
+        sys.exit(f"{len(failed)} question(s) did not get the expected response: {failed}")
+    print(f"Live app handled all {len(results)} question(s).")
 
 
 if __name__ == "__main__":
