@@ -8,6 +8,9 @@ on:
       question:
         description: Question to ask the live app
         required: false
+      questions:
+        description: Batch of questions separated by | (each may be answered or "not found")
+        required: false
   schedule:
     - cron: "37 7 * * 1"  # Mondays 07:37 UTC, after the weekly monitor
   pull_request:
@@ -24,6 +27,7 @@ jobs:
     env:
       APP_URL: ${{ vars.APP_URL || 'https://filings.streamlit.app' }}
       QUESTION: ${{ inputs.question }}
+      QUESTIONS: ${{ inputs.questions }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
