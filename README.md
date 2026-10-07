@@ -101,6 +101,7 @@ All experiment runs are tracked in MLflow with their parameters and metrics.
 | App | App changes | End-to-end answer test in the Docker image and in the hosted-app configuration |
 | Weekly monitor | Scheduled | Re-validates the benchmark against the latest filings and reports usage |
 | Live app check | Scheduled, on demand | Browser-based check that the deployed app returns a cited answer |
+| Daily traffic | Hourly, 9am–5pm New York | Asks the live app a random 1–67 questions a day from an 80-question pool, like real visitors; any error fails the run and alerts the owner |
 
 The hosted application redeploys automatically from `main`.
 

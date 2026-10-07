@@ -1,0 +1,85 @@
+# Question pool for the daily traffic check (checks/daily_traffic.py).
+# One per line; each names one company so retrieval searches the right filing.
+# The last block asks for facts the Risk Factors sections do not contain.
+What does Apple say about dependence on outsourcing partners?
+How could global economic conditions affect Apple?
+What risks does Apple describe around its App Store?
+How does Apple describe competition in its markets?
+What does Apple say about data privacy and security risks?
+How could tariffs and trade restrictions affect Apple?
+What risks does Apple see from new product introductions?
+What does Microsoft say about risks from AI?
+How could cyberattacks affect Microsoft?
+What does Microsoft say about competition in cloud services?
+How could government regulation affect Microsoft?
+What risks does Microsoft see in its datacenter capacity?
+What does Microsoft say about risks to its reputation?
+How could intellectual property claims affect Microsoft?
+What does Tesla say about supply chain risk?
+How could battery cell supply affect Tesla?
+What risks does Tesla see in scaling production?
+How does Tesla describe dependence on Elon Musk?
+What does Tesla say about product recalls?
+How could regulatory credit sales affect Tesla?
+What risks does Tesla describe for its energy storage business?
+How could changes in interest rates affect JPMorgan Chase?
+What does JPMorgan Chase say about cybersecurity risk?
+How could credit losses affect JPMorgan Chase?
+What liquidity risks does JPMorgan Chase describe?
+How could regulation affect JPMorgan Chase's business?
+What does JPMorgan Chase say about operational risk?
+How could market volatility affect JPMorgan Chase?
+How could cybersecurity incidents affect Walmart?
+What does Walmart say about competition?
+How could inflation affect Walmart?
+What risks does Walmart see in its international operations?
+How could supply chain disruptions affect Walmart?
+What does Walmart say about risks from its eCommerce business?
+How could labor costs affect Walmart?
+What risks does Pfizer see from patent expirations?
+How does Pfizer describe risks from drug pricing pressure?
+What does Pfizer say about risks in product development?
+How could product liability claims affect Pfizer?
+What risks does Pfizer see in its manufacturing operations?
+How could the Inflation Reduction Act affect Pfizer?
+What does Pfizer say about competition from generics and biosimilars?
+How could climate change regulation affect Exxon Mobil?
+What does Exxon Mobil say about commodity price risk?
+How could geopolitical events affect Exxon Mobil?
+What operational hazards does Exxon Mobil describe?
+How could changing demand for oil and gas affect Exxon Mobil?
+What does Exxon Mobil say about risks in major projects?
+How could cybersecurity threats affect Exxon Mobil?
+What does Nike say about risks from its reliance on independent manufacturers?
+How could consumer preferences affect Nike?
+What risks does Nike see in international markets?
+How could foreign currency changes affect Nike?
+What does Nike say about competition in athletic footwear?
+How could inventory levels affect Nike?
+What does Nike say about risks to its brand?
+How does Netflix describe competition for viewers?
+What does Netflix say about content costs?
+How could subscriber growth affect Netflix?
+What risks does Netflix see in its advertising business?
+How could piracy affect Netflix?
+What does Netflix say about risks in international expansion?
+How could reliance on third-party platforms affect Netflix?
+What risks does Delta Air Lines see from fuel prices?
+How could labor relations affect Delta Air Lines?
+What does Delta Air Lines say about safety risks?
+How could economic downturns affect demand for Delta Air Lines?
+What risks does Delta Air Lines see from airport and air traffic control constraints?
+How could its loyalty program affect Delta Air Lines?
+What does Delta Air Lines say about risks from aircraft supply?
+What was Apple's total revenue last year?
+Who is the CEO of Microsoft?
+How many vehicles did Tesla deliver last year?
+What dividend does JPMorgan Chase pay per share?
+Who is the CFO of Walmart?
+How much did Pfizer spend on research and development?
+How many barrels per day does Exxon Mobil produce?
+What is Nike's newest shoe?
+How much does Netflix's standard plan cost?
+What was Delta Air Lines' on-time arrival rate?
+How many employees does Microsoft have?
+What is Apple's stock price today?

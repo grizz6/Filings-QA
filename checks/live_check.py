@@ -20,7 +20,7 @@ from playwright.sync_api import sync_playwright
 APP_URL = os.environ.get("APP_URL") or "https://filings.streamlit.app"
 QUESTION = os.environ.get("QUESTION") or "What does Tesla say about supply chain risk?"
 WAKE_SECONDS = 300  # a sleeping Streamlit Cloud app takes a while to start
-ANSWER_SECONDS = 180
+ANSWER_SECONDS = 300  # a first question after the app wakes can take minutes
 DONE = re.compile(
     r"Answered in|Not found in the filings|Setup incomplete|not reachable|limit|quota"
 )

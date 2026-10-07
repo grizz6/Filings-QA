@@ -262,3 +262,23 @@ def test_answer_text_cannot_render_images_or_links():
     assert "http://evil.test" not in safe and "![" not in safe
     assert "Risk [1]." in safe and "here" in safe
     assert "<b>" not in safe
+
+
+def test_warmup_loads_the_model_once_in_the_background(monkeypatch):
+    # Streamlit Cloud wakes the app on the first visit; loading the model then made the
+    # first question slow. The warm-up starts loading as soon as the app starts.
+    from src import index
+
+    loaded = []
+    monkeypatch.setattr(client, "API_URL", "")
+    monkeypatch.setattr(index, "load_embedder", lambda name: loaded.append(name))
+    client._warmup_thread.cache_clear()
+    client.start_warmup().join(timeout=5)
+    client.start_warmup().join(timeout=5)
+    assert loaded == ["sentence-transformers/all-MiniLM-L6-v2"]
+    client._warmup_thread.cache_clear()
+
+
+def test_no_warmup_when_a_separate_api_serves_requests(monkeypatch):
+    monkeypatch.setattr(client, "API_URL", "http://api.test")
+    assert client.start_warmup() is None

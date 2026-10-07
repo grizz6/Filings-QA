@@ -1,7 +1,7 @@
 """Ask page: question in, cited answer out."""
 
 import streamlit as st
-from client import ApiError, call, load_config, safe_markdown, setup_problems
+from client import ApiError, call, load_config, safe_markdown, setup_problems, start_warmup
 
 EXAMPLES = [
     "What does Tesla say about supply chain risk?",
@@ -11,6 +11,7 @@ EXAMPLES = [
 ]
 
 st.set_page_config(page_title="Filings Q&A", page_icon="📄", layout="centered")
+start_warmup()  # load the search model while the visitor reads the page
 cfg = load_config()
 
 st.title("Filings Q&A")
