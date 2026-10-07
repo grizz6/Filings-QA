@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -61,6 +62,32 @@ def _build_local_api(secrets_present: tuple[bool, ...]):
 
     # raise_server_exceptions=False: an unexpected error becomes a 500, as over HTTP.
     return TestClient(create_app(), raise_server_exceptions=False)
+
+
+def _load_model_quietly(name: str) -> None:
+    from src import index
+
+    try:
+        index.load_embedder(name)
+    except Exception as exc:  # the first question will load it (and report errors) instead
+        print(f"WARNING: model warm-up failed: {exc}", file=sys.stderr)
+
+
+@lru_cache(maxsize=1)
+def _warmup_thread() -> threading.Thread:
+    name = load_config()["retrieval"]["embedding_model"]
+    thread = threading.Thread(target=_load_model_quietly, args=(name,), daemon=True)
+    thread.start()
+    return thread
+
+
+def start_warmup() -> threading.Thread | None:
+    """Start loading the embedding model in the background as soon as the app starts.
+
+    On Streamlit Cloud the app wakes on the first visit; without this, the first question
+    also waited for the model to load. Only in-process mode needs it (no API_URL).
+    """
+    return None if API_URL else _warmup_thread()
 
 
 def call(method: str, path: str, **kwargs) -> dict:

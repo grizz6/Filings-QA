@@ -121,3 +121,28 @@ def test_search_filters_by_ticker_list():
 
 def test_chunks_table_has_row_level_security():
     assert "ALTER TABLE chunks ENABLE ROW LEVEL SECURITY" in index.schema_sql(384)
+
+
+def test_embedder_loads_once_even_when_requested_concurrently(monkeypatch):
+    import sys
+    import threading
+    import time
+    import types
+
+    built = []
+
+    class SlowModel:
+        def __init__(self, name):
+            time.sleep(0.2)  # loading a real model takes seconds
+            built.append(name)
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers",
+                        types.SimpleNamespace(SentenceTransformer=SlowModel))  # fmt: skip
+    index.load_embedder.cache_clear()
+    threads = [threading.Thread(target=index.load_embedder, args=("m",)) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert built == ["m"]
+    index.load_embedder.cache_clear()

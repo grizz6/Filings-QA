@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import sys
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -89,11 +90,23 @@ def rows_for_insert(chunks: list[dict], vectors, index_name: str) -> list[tuple]
     ]
 
 
+_EMBEDDER_LOCK = threading.Lock()
+
+
 @lru_cache(maxsize=2)
-def load_embedder(model_name: str):
+def _build_embedder(model_name: str):
     from sentence_transformers import SentenceTransformer  # heavy import, only when needed
 
     return SentenceTransformer(model_name)
+
+
+def load_embedder(model_name: str):
+    """Load the model once per process, even if a warm-up and a request ask at once."""
+    with _EMBEDDER_LOCK:
+        return _build_embedder(model_name)
+
+
+load_embedder.cache_clear = _build_embedder.cache_clear
 
 
 def embed(model, texts: list[str]):

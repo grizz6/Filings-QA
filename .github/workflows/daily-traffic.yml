@@ -1,0 +1,53 @@
+name: Daily traffic
+
+# Asks the live app real questions every day, like visitors would, so the Monitoring page
+# always has fresh data and problems show up the same day.
+# - Each day picks a random total of 1-67 questions (seeded by the date) from
+#   checks/questions.txt, spread over hourly slots from 9:00 to 16:59 New York time.
+# - The cron fires hourly over a UTC range that covers 9am-5pm New York in both summer and
+#   winter time; checks/daily_traffic.py keeps only the runs inside the window.
+# - Every question must get a cited answer or a clear "Not found in the filings.";
+#   anything else fails the run, and GitHub emails the repository owner.
+on:
+  schedule:
+    - cron: "23 13-21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-traffic
+  cancel-in-progress: false
+
+jobs:
+  ask:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      APP_URL: ${{ vars.APP_URL || 'https://filings.streamlit.app' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Plan this hour's questions
+        id: plan
+        run: echo "questions=$(python checks/daily_traffic.py)" >> "$GITHUB_OUTPUT"
+      - name: Install Playwright with Chromium
+        if: steps.plan.outputs.questions != ''
+        run: |
+          pip install "playwright>=1.45"
+          python -m playwright install --with-deps chromium
+      - name: Ask the live app
+        if: steps.plan.outputs.questions != ''
+        env:
+          QUESTIONS: ${{ steps.plan.outputs.questions }}
+        run: python checks/live_check.py
+      - name: Screenshot
+        if: always() && steps.plan.outputs.questions != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-traffic
+          path: live-check.png
+          if-no-files-found: ignore
