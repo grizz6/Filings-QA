@@ -5,8 +5,9 @@ name: Daily traffic
 # - Each day picks a random total of 1-67 questions (seeded by the date) from
 #   checks/questions.txt, spread over hourly slots from 9:00 to 16:59 New York time.
 # - The cron fires hourly over a UTC range that covers 9am-5pm New York in both summer and
-#   winter time; checks/daily_traffic.py keeps only the runs inside the window.
-# - GitHub may start scheduled runs late; the slot is taken from the time the run starts.
+#   winter time.
+# - GitHub may start scheduled runs late or skip them, so each run catches up: it asks the
+#   questions of every slot that started since the day's previous run, never one twice.
 # - Every question must get a cited answer or a clear "Not found in the filings.";
 #   anything else fails the run, and GitHub emails the repository owner.
 on:
@@ -16,6 +17,7 @@ on:
 
 permissions:
   contents: read
+  actions: read  # list earlier runs of this workflow to know which questions are due
 
 concurrency:
   group: daily-traffic
@@ -24,7 +26,7 @@ concurrency:
 jobs:
   ask:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 300  # a catch-up run can ask a whole day's questions
     env:
       APP_URL: ${{ vars.APP_URL || 'https://filings.streamlit.app' }}
     steps:
@@ -32,8 +34,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Plan this hour's questions
+      - name: Plan the questions due now
         id: plan
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: echo "questions=$(python checks/daily_traffic.py)" >> "$GITHUB_OUTPUT"
       - name: Install Playwright with Chromium
         if: steps.plan.outputs.questions != ''
