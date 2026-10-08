@@ -100,8 +100,8 @@ All automation runs on GitHub Actions:
 - **End-to-end testing:** the containerized app and the hosted app are tested with real
   questions before release.
 - **Continuous delivery:** the hosted application redeploys automatically from `main`.
-- **Scheduled checks:** the live app is exercised daily and the benchmark is re-validated
-  weekly, with alerts on any failure.
+- **Scheduled checks:** the live app is exercised daily, kept available around the clock,
+  and the benchmark is re-validated weekly, with alerts on any failure.
 
 ### Monitoring
 
