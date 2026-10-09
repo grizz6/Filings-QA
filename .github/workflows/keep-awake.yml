@@ -1,12 +1,16 @@
 name: Keep app awake
 
 # Streamlit Community Cloud puts an app to sleep after 12 hours without visitors. This opens
-# the app in a headless browser every 4 hours, around the clock, so it never reaches that
-# limit even when GitHub starts a scheduled run hours late. If the app is already asleep it
-# is woken up. A failure (the app does not load) fails the run and GitHub emails the owner.
+# the app in a headless browser every 30 minutes, around the clock; GitHub often starts
+# scheduled runs late or drops them, so the frequent schedule keeps visits well inside that
+# limit. If the app is asleep it is woken up and the run waits until the app is usable.
+# A failure (the app does not load) fails the run and GitHub emails the owner.
+#
+# Each run also starts the Daily traffic workflow when questions are due, so the daily
+# questions still go out on days when GitHub skips that workflow's own schedule.
 on:
   schedule:
-    - cron: "41 */4 * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
   pull_request:
     paths:
@@ -15,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  actions: write  # start the Daily traffic workflow when questions are due
 
 concurrency:
   group: keep-awake
@@ -37,6 +42,17 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Open the app
         run: python checks/keep_awake.py
+      - name: Start the daily questions if any are due
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          due=$(python checks/daily_traffic.py)
+          if [ -n "$due" ]; then
+            gh workflow run daily-traffic.yml --ref main
+            echo "Started Daily traffic: questions are due" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Screenshot
         if: always()
         uses: actions/upload-artifact@v4

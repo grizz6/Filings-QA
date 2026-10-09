@@ -21,21 +21,31 @@ APP_URL = os.environ.get("APP_URL") or "https://filings.streamlit.app"
 QUESTION = os.environ.get("QUESTION") or "What does Tesla say about supply chain risk?"
 WAKE_SECONDS = 300  # a sleeping Streamlit Cloud app takes a while to start
 ANSWER_SECONDS = 300  # a first question after the app wakes can take minutes
+WAKE_BUTTON = re.compile(r"get this app back up|wake .*up", re.I)
 DONE = re.compile(
     r"Answered in|Not found in the filings|Setup incomplete|not reachable|limit|quota"
 )
 
 
 def app_frame(page, deadline: float):
-    """The frame that renders the app (Streamlit Cloud wraps the app in an iframe)."""
+    """The frame that renders the app (Streamlit Cloud wraps the app in an iframe).
+
+    Counts as loaded only once the question box is on screen: the sleep page and the
+    Streamlit Cloud shell can show the app's name before the app itself is running. The
+    wake-up button is searched for in every frame and clicked whenever it appears.
+    """
+    woke = False
     while time.time() < deadline:
-        wake = page.get_by_role("button", name=re.compile("get this app back up", re.I))
-        if wake.count():
-            print("App was asleep; waking it up", flush=True)
-            wake.first.click()
         for frame in page.frames:
             try:
-                if frame.get_by_text("Filings Q&A").count():
+                wake = frame.get_by_role("button", name=WAKE_BUTTON)
+                if wake.count():
+                    if not woke:
+                        print("App was asleep; waking it up", flush=True)
+                    woke = True
+                    wake.first.click()
+                    break
+                if frame.get_by_label("Your question").count():
                     return frame
             except Exception:  # frame navigated away while we looked
                 continue
